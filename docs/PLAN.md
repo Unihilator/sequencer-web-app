@@ -7,7 +7,7 @@
 - [x] Ініціалізувати Next.js (App Router, TypeScript strict, Tailwind, ESLint, src/, pnpm). Якщо create-next-app відмовляється працювати в непорожній директорії, згенеруй у тимчасовій папці й перенеси файли.
 - [x] Prettier, скрипти lint/typecheck/test/test:e2e, Vitest, Playwright
 - [x] Базовий layout, шрифти через next/font, заглушка головної
-- [ ] .gitignore, .env.example, README з описом проєкту
+- [x] .gitignore, .env.example, README з описом проєкту
 - [ ] 👤 Створити репозиторій на GitHub, запушити код
 - [ ] GitHub Actions: lint + typecheck + test + build на кожен push/PR
 - [ ] 👤 Акаунт Vercel, імпорт репозиторію, перший деплой (preview + production)

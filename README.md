@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Roman Derkach — portfolio & online sequencer
 
-## Getting Started
+Personal portfolio of an iOS developer, built as an end-to-end learning
+project: code, hosting, domain, DNS, CI/CD, SEO, analytics and launch.
 
-First, run the development server:
+## What's inside
+
+- **Home** — portfolio with scroll-driven animations and a 3D/shader hero.
+- **/sequencer** — browser step sequencer (drum machine + simple synth) with
+  audio-reactive visuals and pattern sharing via URL.
+- **/projects** — iOS apps.
+- **/blog** — articles written in MDX.
+
+Status and roadmap: [docs/PLAN.md](docs/PLAN.md).
+
+## Stack
+
+Next.js (App Router) · TypeScript (strict) · Tailwind CSS · Motion ·
+GSAP + ScrollTrigger · Lenis · Three.js + React Three Fiber · Tone.js ·
+Zustand · MDX · Vitest · Playwright · ESLint + Prettier.
+Hosted on Vercel, DNS on Cloudflare, CI on GitHub Actions.
+
+## Getting started
+
+Requirements: Node.js 24+ (see `.nvmrc`) and pnpm (version pinned in
+`package.json` → `packageManager`).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command          | What it does                                    |
+| ---------------- | ----------------------------------------------- |
+| `pnpm dev`       | Start the dev server                            |
+| `pnpm build`     | Production build                                |
+| `pnpm start`     | Serve the production build                      |
+| `pnpm lint`      | ESLint                                          |
+| `pnpm typecheck` | TypeScript type check                           |
+| `pnpm format`    | Format with Prettier (`format:check` for CI)    |
+| `pnpm test`      | Unit tests (Vitest); `test:watch` for watch     |
+| `pnpm test:e2e`  | E2E tests (Playwright: Chromium, mobile WebKit) |
 
-## Learn More
+First e2e run needs browsers: `pnpm exec playwright install chromium webkit`.
 
-To learn more about Next.js, take a look at the following resources:
+## Project structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+src/app         routes (App Router)
+src/audio       audio engine (framework-agnostic, no React)
+src/components  UI components; src/components/three for 3D scenes
+src/lib         utilities, SEO helpers, analytics
+src/store       Zustand stores
+content/blog    MDX articles
+e2e             Playwright tests
+docs            plan and documentation
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Directories appear as the corresponding features are built.
