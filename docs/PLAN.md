@@ -10,7 +10,7 @@
 - [x] .gitignore, .env.example, README з описом проєкту
 - [x] 👤 Створити репозиторій на GitHub, запушити код
 - [x] GitHub Actions: lint + typecheck + test + build на кожен push/PR
-- [ ] 👤 Акаунт Vercel, імпорт репозиторію, перший деплой (preview + production)
+- [x] 👤 Акаунт Vercel, імпорт репозиторію, перший деплой (preview + production)
 - [ ] 👤 Обрати і купити домен (Cloudflare Registrar; варіанти: імʼя.dev / .com / .me)
 - [ ] 👤 Налаштувати DNS у Cloudflare → Vercel, перевірити HTTPS і редирект www ↔ apex
 - [ ] 👤 Cloudflare Email Routing: hello@домен → особиста пошта
