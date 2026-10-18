@@ -1,8 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(pnpm *)",
-      "Bash(pnpx *)"
-    ]
+    "allow": ["Bash(pnpm *)", "Bash(pnpx *)"]
   }
 }

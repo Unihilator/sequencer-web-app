@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+.next
+out
+build
+coverage
+playwright-report
+test-results
+docs/codemie
