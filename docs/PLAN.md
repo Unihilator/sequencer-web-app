@@ -3,7 +3,7 @@
 Позначки: [ ] — не зроблено, [x] — зроблено, 👤 — ручна дія власника.
 
 ## Етап 0 — Фундамент
-- [ ] Ініціалізувати Next.js (App Router, TypeScript strict, Tailwind, ESLint, src/, pnpm). Якщо create-next-app відмовляється працювати в непорожній директорії, згенеруй у тимчасовій папці й перенеси файли.
+- [x] Ініціалізувати Next.js (App Router, TypeScript strict, Tailwind, ESLint, src/, pnpm). Якщо create-next-app відмовляється працювати в непорожній директорії, згенеруй у тимчасовій папці й перенеси файли.
 - [ ] Prettier, скрипти lint/typecheck/test/test:e2e, Vitest, Playwright
 - [ ] Базовий layout, шрифти через next/font, заглушка головної
 - [ ] .gitignore, .env.example, README з описом проєкту
