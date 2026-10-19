@@ -18,10 +18,11 @@ type Position = { row: number; col: number };
 // Pixels of vertical drag per scale step when changing a note by touch/mouse.
 const DRAG_PX_PER_NOTE = 12;
 
+// Melodic cells show a note name in dark text, so they use the light accent.
 const ACTIVE_COLORS = {
-  drums: "bg-sky-400",
-  fx: "bg-amber-400",
-  melodic: "bg-fuchsia-400",
+  drums: "bg-accent",
+  fx: "bg-signal",
+  melodic: "bg-accent-soft",
 } as const;
 
 export function SequencerGrid() {

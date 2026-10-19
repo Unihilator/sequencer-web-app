@@ -1,21 +1,67 @@
 @import "tailwindcss";
 
-/* Dark theme is the primary (and for now only) theme. */
+/*
+ * Design tokens — palette "Ultramarine" (A1).
+ * Dark theme is the primary (and for now only) theme: a blue-black ground,
+ * warm off-white ink, one bold ultramarine accent and a coral counterpoint.
+ */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #0b0c14;
+  --surface: #151726;
+  --foreground: #eeede8;
+  --muted: #8a8da3;
+  /* Fills (buttons, active cells). Too dark for text on the background. */
+  --accent: #3d46fb;
+  /* Accent for text and thin lines on the dark ground. */
+  --accent-soft: #8a90ff;
+  /* Second accent, used sparingly. */
+  --signal: #ff6b4a;
   color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-signal: var(--signal);
+
+  /* Display serif for big headlines only; Manrope for everything else;
+     JetBrains Mono for technical labels (BPM, steps, code). */
+  --font-display: var(--font-playfair), Georgia, serif;
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+@theme {
+  /* Fluid type for headlines: text-display, text-headline. */
+  --text-display: clamp(3rem, 9vw, 7rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.02em;
+  --text-headline: clamp(2rem, 5vw, 3.5rem);
+  --text-headline--line-height: 1.05;
+  --text-headline--letter-spacing: -0.015em;
+
+  /* Layout rhythm: px-gutter for page sides, py-section between sections. */
+  --spacing-gutter: clamp(1rem, 4vw, 2.5rem);
+  --spacing-section: clamp(4rem, 10vw, 9rem);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
 }

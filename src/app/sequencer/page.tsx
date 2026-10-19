@@ -17,10 +17,8 @@ export default function SequencerPage() {
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-12 sm:px-6">
       <header className="flex flex-col gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
-          Секвенсер
-        </h1>
-        <p className="max-w-2xl text-foreground/70">{description}</p>
+        <h1 className="font-display text-headline font-medium">Секвенсер</h1>
+        <p className="max-w-2xl text-muted">{description}</p>
       </header>
       <Sequencer />
     </main>

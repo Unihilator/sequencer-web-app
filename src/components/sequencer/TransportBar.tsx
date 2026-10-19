@@ -19,7 +19,7 @@ export function TransportBar() {
         onClick={() => void togglePlay()}
         aria-pressed={isPlaying}
         aria-keyshortcuts="Space"
-        className="min-w-24 rounded-full bg-foreground px-5 py-2 font-medium text-background transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+        className="min-w-24 rounded-full bg-accent px-5 py-2 font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-soft"
       >
         {status === "loading" ? "…" : isPlaying ? "Stop" : "Play"}
       </button>
