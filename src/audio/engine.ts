@@ -76,7 +76,12 @@ export class AudioEngine {
 
   /** Starts from step 0 at `atTime` (AudioContext seconds) or right away. */
   async play(atTime?: number): Promise<void> {
+    // Resume on every Play, synchronously inside the gesture: iOS suspends
+    // ("interrupts") the AudioContext when the tab goes to the background,
+    // and only a new user gesture brings it back.
+    const resumed = this.tone?.start();
     await this.init();
+    await resumed;
     const Tone = this.tone;
     if (!Tone) return;
     const transport = Tone.getTransport();
