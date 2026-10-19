@@ -32,6 +32,8 @@ export class AudioEngine {
   private repeatId: number | null = null;
   private stepCounter = 0;
   private playing = false;
+  // Set when the page goes to the background; see onVisibilityChange.
+  private contextStale = false;
   private stepListeners = new Set<StepListener>();
   private playingListeners = new Set<PlayingListener>();
 
@@ -76,9 +78,9 @@ export class AudioEngine {
 
   /** Starts from step 0 at `atTime` (AudioContext seconds) or right away. */
   async play(atTime?: number): Promise<void> {
-    // Resume on every Play, synchronously inside the gesture: iOS suspends
-    // ("interrupts") the AudioContext when the tab goes to the background,
-    // and only a new user gesture brings it back.
+    // Both steps run synchronously inside the user gesture: browsers only
+    // create or resume an audible AudioContext from a gesture.
+    if (this.contextStale) this.replaceContext();
     const resumed = this.tone?.start();
     await this.init();
     await resumed;
@@ -95,6 +97,9 @@ export class AudioEngine {
   stop(): void {
     if (!this.tone) return;
     this.tone.getTransport().stop();
+    // Steps are queued for drawing slightly ahead; drop the pending ones so
+    // the playhead does not reappear after Stop.
+    this.tone.getDraw().cancel();
     this.setPlaying(false);
   }
 
@@ -117,6 +122,24 @@ export class AudioEngine {
       document.removeEventListener("visibilitychange", this.onVisibilityChange);
     }
     this.stop();
+    this.teardownGraph();
+    this.tone = null;
+    this.loading = null;
+    this.contextStale = false;
+  }
+
+  // Swaps in a brand-new AudioContext and rebuilds the graph on it.
+  private replaceContext(): void {
+    this.contextStale = false;
+    const Tone = this.tone;
+    if (!Tone) return;
+    this.teardownGraph();
+    Tone.setContext(new Tone.Context(), true);
+    this.buildGraph(Tone);
+    this.applyPattern(this.pattern);
+  }
+
+  private teardownGraph(): void {
     if (this.tone && this.repeatId !== null) {
       this.tone.getTransport().clear(this.repeatId);
     }
@@ -125,8 +148,6 @@ export class AudioEngine {
     this.strips.clear();
     this.disposables = [];
     this.repeatId = null;
-    this.tone = null;
-    this.loading = null;
   }
 
   private buildGraph(Tone: Tone): void {
@@ -197,6 +218,7 @@ export class AudioEngine {
   }
 
   private emitStep(step: number): void {
+    if (!this.playing) return;
     for (const listener of this.stepListeners) listener(step);
   }
 
@@ -206,10 +228,13 @@ export class AudioEngine {
     for (const listener of this.playingListeners) listener(playing);
   }
 
-  // iOS suspends audio in background tabs; stop cleanly instead of resuming
-  // mid-bar with stuck notes.
+  // Safari interrupts audio in background tabs and may never resume that
+  // AudioContext (or resume it silent). Stop cleanly instead of continuing
+  // mid-bar with stuck notes, and start the next Play on a fresh context.
   private onVisibilityChange = () => {
-    if (document.visibilityState === "hidden" && this.playing) this.stop();
+    if (document.visibilityState !== "hidden" || !this.tone) return;
+    this.stop();
+    this.contextStale = true;
   };
 }
 

@@ -77,6 +77,66 @@ test.describe("sequencer", () => {
     await expect(page.locator("[data-current]")).toHaveCount(0);
     expect(errors).toEqual([]);
   });
+
+  // Safari can leave a backgrounded AudioContext "interrupted" forever.
+  // Simulate that: hide the page, break the context, come back, press Play.
+  test("plays again after the tab was in the background", async ({ page }) => {
+    await page.addInitScript(() => {
+      const Native = window.AudioContext;
+      const created: AudioContext[] = [];
+      Object.assign(window, { __contexts: created });
+      window.AudioContext = class extends Native {
+        constructor(options?: AudioContextOptions) {
+          super(options);
+          created.push(this);
+        }
+      };
+    });
+    await page.reload();
+
+    await page
+      .getByRole("button", { name: "Kick, крок 1", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect(page.locator("[data-current]").first()).toBeVisible();
+
+    await page.evaluate(async () => {
+      const setVisibility = (value: DocumentVisibilityState) => {
+        Object.defineProperty(document, "visibilityState", {
+          value,
+          configurable: true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      const { __contexts: contexts } = window as unknown as {
+        __contexts: AudioContext[];
+      };
+      const broken = contexts[contexts.length - 1];
+      setVisibility("hidden");
+      await broken.suspend();
+      broken.resume = () => new Promise<void>(() => {});
+      setVisibility("visible");
+    });
+    await expect(page.getByRole("button", { name: "Play" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.locator("[data-current]").first()).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const { __contexts: contexts } = window as unknown as {
+          __contexts: AudioContext[];
+        };
+        return contexts[contexts.length - 1].state;
+      }),
+    ).toBe("running");
+  });
 });
 
 test.describe("sharing", () => {
