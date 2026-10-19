@@ -78,3 +78,39 @@ test.describe("sequencer", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test.describe("sharing", () => {
+  test("share link restores the pattern", async ({ page, context }) => {
+    await page.goto("/sequencer");
+    await page
+      .getByRole("button", { name: "Kick, крок 1", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Snare, крок 5", exact: true })
+      .click();
+    await page.getByRole("button", { name: "32", exact: true }).click();
+    await page.getByRole("button", { name: "Поділитися" }).click();
+
+    // The address bar now holds the shareable link.
+    await expect(page).toHaveURL(/\/sequencer\?p=[A-Za-z0-9_-]+$/);
+    const shared = page.url();
+
+    const friend = await context.newPage();
+    await friend.goto(shared);
+    await expect(
+      friend.getByRole("button", { name: "Snare, крок 5", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    // 32 steps: the second bar repeats the first.
+    await expect(
+      friend.getByRole("button", { name: "Kick, крок 17", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("broken link shows a notice and an empty pattern", async ({ page }) => {
+    await page.goto("/sequencer?p=broken");
+    await expect(page.getByRole("status")).toContainText("пошкоджене");
+    await expect(
+      page.getByRole("button", { name: "Kick, крок 1", exact: true }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+});

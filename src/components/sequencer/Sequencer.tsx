@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
+import { PatternFromUrl } from "./PatternFromUrl";
 import { SequencerGrid } from "./SequencerGrid";
 import { SequencerProvider, useSequencer } from "./SequencerProvider";
+import { ShareButton } from "./ShareButton";
 import { TransportBar } from "./TransportBar";
 
 export function Sequencer() {
@@ -10,7 +12,13 @@ export function Sequencer() {
     <SequencerProvider>
       <SpaceToPlay />
       <div className="flex flex-col gap-6">
-        <TransportBar />
+        <Suspense fallback={null}>
+          <PatternFromUrl />
+        </Suspense>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <TransportBar />
+          <ShareButton />
+        </div>
         <SequencerGrid />
         <p className="text-sm text-foreground/50">
           Пробіл — play/stop. Стрілки — рух по сітці, Enter — увімкнути крок,

@@ -47,9 +47,14 @@ export function SequencerProvider({
 }
 
 export function useSequencer<T>(selector: (state: SequencerState) => T): T {
+  return useStore(useSequencerStore(), selector);
+}
+
+/** Raw store, for reading state in event handlers without re-rendering. */
+export function useSequencerStore(): SequencerStore {
   const store = useContext(SequencerContext);
   if (!store) {
     throw new Error("useSequencer must be used inside <SequencerProvider>");
   }
-  return useStore(store, selector);
+  return store;
 }

@@ -26,6 +26,9 @@ import {
   type Track,
 } from "./pattern";
 
+/** Query parameter that carries an encoded pattern in share links. */
+export const PATTERN_URL_PARAM = "p";
+
 const VERSION = 1;
 const HEADER_BYTES = 4;
 const TRACK_HEADER_BYTES = 3;
