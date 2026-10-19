@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { EngineDiagnostics } from "@/audio/engine";
+import type { AudioSessionType, EngineDiagnostics } from "@/audio/engine";
 import { useSequencerEngine } from "./SequencerProvider";
 
 const MAX_LINES = 80;
@@ -17,10 +17,17 @@ export function AudioDebugPanel() {
 function Panel() {
   const engine = useSequencerEngine();
   const [lines, setLines] = useState<string[]>([]);
-  const [live, setLive] = useState<EngineDiagnostics>(() =>
-    engine.diagnostics(),
-  );
+  // Filled on the first animation frame: browser-only values (like the
+  // audio session) must not be part of the server-rendered HTML.
+  const [live, setLive] = useState<EngineDiagnostics | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sessionType, setSessionType] = useState<AudioSessionType>(
+    engine.audioSessionType,
+  );
+  const changeSessionType = (type: AudioSessionType) => {
+    engine.setAudioSessionType(type);
+    setSessionType(type);
+  };
 
   useEffect(
     () =>
@@ -41,13 +48,13 @@ function Panel() {
     return () => cancelAnimationFrame(frame);
   }, [engine]);
 
-  const report = [
-    navigator.userAgent,
-    `live: context=${live.contextState} time=${live.contextTime.toFixed(2)} transport=${live.transportState} playing=${live.playing} contexts=${live.contextsCreated}`,
-    ...lines,
-  ].join("\n");
-
   const copy = async () => {
+    const now = engine.diagnostics();
+    const report = [
+      navigator.userAgent,
+      `live: context=${now.contextState} time=${now.contextTime.toFixed(2)} transport=${now.transportState} playing=${now.playing} contexts=${now.contextsCreated} audioSession=${now.audioSession} sessionSetting=${sessionType}`,
+      ...lines,
+    ].join("\n");
     try {
       await navigator.clipboard.writeText(report);
       setCopied(true);
@@ -63,11 +70,29 @@ function Panel() {
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <strong>audio debug</strong>
-        <span>context: {live.contextState}</span>
-        <span>time: {live.contextTime.toFixed(2)}</span>
-        <span>transport: {live.transportState}</span>
-        <span>playing: {String(live.playing)}</span>
-        <span>contexts: {live.contextsCreated}</span>
+        {live && (
+          <>
+            <span>context: {live.contextState}</span>
+            <span>time: {live.contextTime.toFixed(2)}</span>
+            <span>transport: {live.transportState}</span>
+            <span>playing: {String(live.playing)}</span>
+            <span>contexts: {live.contextsCreated}</span>
+            <span>audioSession: {live.audioSession}</span>
+          </>
+        )}
+        <label className="flex items-center gap-1">
+          type on Play:
+          <select
+            value={sessionType}
+            onChange={(e) =>
+              changeSessionType(e.target.value as AudioSessionType)
+            }
+            className="rounded bg-foreground/15 px-1 py-0.5"
+          >
+            <option value="playback">playback</option>
+            <option value="auto">auto</option>
+          </select>
+        </label>
         <button
           type="button"
           onClick={() => void copy()}

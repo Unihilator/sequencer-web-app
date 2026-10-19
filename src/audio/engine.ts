@@ -20,7 +20,11 @@ export type EngineDiagnostics = {
   transportState: string;
   playing: boolean;
   contextsCreated: number;
+  /** navigator.audioSession "type/state", or "unsupported". */
+  audioSession: string;
 };
+
+export type AudioSessionType = "playback" | "auto";
 
 type Strip = {
   voice: Voice;
@@ -48,6 +52,11 @@ export class AudioEngine {
   private playingListeners = new Set<PlayingListener>();
   private debugListeners = new Set<DebugListener>();
   private contextsCreated = 0;
+  /**
+   * Audio Session API type applied on every play(). "playback" plays through
+   * the iPhone silent switch; "auto" is the browser default (diagnostics).
+   */
+  private sessionType: AudioSessionType = "playback";
 
   constructor(pattern: Pattern) {
     this.pattern = pattern;
@@ -67,7 +76,9 @@ export class AudioEngine {
   }
 
   private async load(): Promise<void> {
-    preferPlaybackAudioSession();
+    getAudioSession()?.addEventListener?.("statechange", () =>
+      this.debug(`audioSession: ${describeAudioSession()}`),
+    );
     this.debug("load: importing tone");
     const Tone = await import("tone");
     this.watchContext(Tone);
@@ -99,6 +110,9 @@ export class AudioEngine {
     // Both steps run synchronously inside the user gesture: browsers only
     // create or resume an audible AudioContext from a gesture.
     this.debug(`play: called${this.contextStale ? " (stale context)" : ""}`);
+    // Re-applied on every gesture: Safari may deactivate the page's audio
+    // session while it is in the background.
+    applyAudioSessionType(this.sessionType);
     if (this.contextStale) this.replaceContext();
     const resumed = this.tone?.start();
     await this.init();
@@ -145,6 +159,14 @@ export class AudioEngine {
     return () => this.debugListeners.delete(listener);
   }
 
+  get audioSessionType(): AudioSessionType {
+    return this.sessionType;
+  }
+
+  setAudioSessionType(type: AudioSessionType): void {
+    this.sessionType = type;
+  }
+
   diagnostics(): EngineDiagnostics {
     const context = this.tone?.getContext();
     return {
@@ -153,6 +175,7 @@ export class AudioEngine {
       transportState: this.tone?.getTransport().state ?? "none",
       playing: this.playing,
       contextsCreated: this.contextsCreated,
+      audioSession: describeAudioSession(),
     };
   }
 
@@ -305,11 +328,23 @@ export class AudioEngine {
   };
 }
 
-// Newer Safari: play through the iPhone silent switch like a music app.
-// Feature-detected: the Audio Session API is not available everywhere yet.
-function preferPlaybackAudioSession(): void {
-  if (typeof navigator === "undefined") return;
-  const session = (navigator as Navigator & { audioSession?: { type: string } })
+// Newer Safari: the Audio Session API lets a page behave like a music app
+// (e.g. "playback" plays through the iPhone silent switch). Feature-detected:
+// it is not available everywhere yet.
+type AudioSession = EventTarget & { type: string; state?: string };
+
+function getAudioSession(): AudioSession | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  return (navigator as Navigator & { audioSession?: AudioSession })
     .audioSession;
-  if (session) session.type = "playback";
+}
+
+function applyAudioSessionType(type: AudioSessionType): void {
+  const session = getAudioSession();
+  if (session && session.type !== type) session.type = type;
+}
+
+function describeAudioSession(): string {
+  const session = getAudioSession();
+  return session ? `${session.type}/${session.state ?? "?"}` : "unsupported";
 }
