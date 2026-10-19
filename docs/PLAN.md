@@ -12,7 +12,7 @@
 - [x] GitHub Actions: lint + typecheck + test + build на кожен push/PR
 - [x] 👤 Акаунт Vercel, імпорт репозиторію, перший деплой (preview + production)
 - [x] 👤 Обрати і купити домен (Cloudflare Registrar; варіанти: імʼя.dev / .com / .me) — imsequencer.dev
-- [ ] 👤 Налаштувати DNS у Cloudflare → Vercel, перевірити HTTPS і редирект www ↔ apex
+- [x] 👤 Налаштувати DNS у Cloudflare → Vercel, перевірити HTTPS і редирект www ↔ apex
 - [ ] 👤 Cloudflare Email Routing: hello@домен → особиста пошта
 - [ ] Пояснити мені, як працює вся ланка: домен → DNS → CDN → хостинг → SSL
 
