@@ -11,11 +11,15 @@ void main() {
 
 // A slow, "breathing" field: domain-warped fractal noise (fbm feeding fbm),
 // tinted with the site palette. Colors mirror the tokens in globals.css.
+// Depth comes from three layers with parallax (far haze, the main field,
+// near dark wisps), a soft light source and a vignette; film grain on top.
 export const FRAGMENT_SHADER = /* glsl */ `#version 300 es
 precision highp float;
 
 uniform vec2 uResolution;
 uniform float uTime;
+// Smoothed pointer position, -1..1 on both axes (0 = centre).
+uniform vec2 uPointer;
 
 out vec4 outColor;
 
@@ -56,9 +60,13 @@ float fbm(vec2 p) {
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
-  float t = uTime * 0.035;
-  vec2 p = uv * 1.4;
+  float t = uTime * 0.022;
 
+  // Far layer: large, slow, barely moves with the pointer.
+  float far = fbm((uv + uPointer * 0.015) * 1.1 + vec2(0.5 * t, -0.3 * t));
+
+  // Main layer: the warped field.
+  vec2 p = (uv + uPointer * 0.045) * 1.4;
   vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, 1.3) - t));
   vec2 r = vec2(
     fbm(p + 3.5 * q + vec2(1.7, 9.2) + 1.3 * t),
@@ -66,17 +74,31 @@ void main() {
   );
   float f = fbm(p + 3.5 * r);
 
-  vec3 color = BACKGROUND;
+  // Near layer: big soft wisps that drift faster and shift the most.
+  float near = fbm((uv + uPointer * 0.13) * 0.9 + vec2(-1.6 * t, 0.9 * t) + 20.0);
+  near = smoothstep(0.52, 0.8, near);
+
+  vec3 color = BACKGROUND + ACCENT * 0.16 * smoothstep(0.3, 0.8, far);
   color = mix(color, ACCENT * 0.8, smoothstep(0.22, 0.8, f));
   color = mix(color, ACCENT_SOFT * 0.75, smoothstep(0.5, 0.95, f) * clamp(length(q), 0.0, 1.0));
   // Rare warm glints where the warped layers line up.
   color += SIGNAL * 0.22 * smoothstep(0.62, 0.9, r.x) * smoothstep(0.5, 0.85, f);
 
-  // Fade to the page background towards the edges.
-  color = mix(BACKGROUND, color, smoothstep(1.7, 0.1, length(uv)));
+  // Soft key light from the upper right, like a lamp behind smoke.
+  float light = smoothstep(1.6, 0.0, length(uv - vec2(0.55, 0.4)));
+  color *= 0.55 + 0.75 * light;
 
-  // Film grain doubles as dithering against gradient banding.
-  color += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) * (3.0 / 255.0);
+  // Foreground wisps occlude the light: a dark silhouette in front.
+  color = mix(color, BACKGROUND * 0.7, near * 0.6);
+
+  // Cinematic vignette.
+  float vignette = smoothstep(1.45, 0.25, length(uv * vec2(0.85, 1.1)));
+  color *= mix(0.3, 1.0, vignette);
+
+  // Animated film grain: new every frame, strongest in the mid-tones.
+  float luma = dot(color, vec3(0.299, 0.587, 0.114));
+  float grain = hash(gl_FragCoord.xy + fract(uTime * 1.37) * 517.0) - 0.5;
+  color += grain * (0.025 + 0.09 * luma);
 
   outColor = vec4(color, 1.0);
 }

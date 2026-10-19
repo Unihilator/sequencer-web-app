@@ -14,6 +14,8 @@ const RENDER_SCALE = 0.5;
 const START_TIME = 12;
 // Clamp long frame gaps (tab switch, debugger) so the field never jumps.
 const MAX_FRAME_SECONDS = 0.1;
+// How quickly the parallax follows the pointer (per second); lower = lazier.
+const POINTER_FOLLOW = 2.5;
 
 /** Size of the drawing buffer for a canvas of the given CSS size. */
 export function renderSize(
@@ -60,6 +62,8 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   let frameId = 0;
   let onScreen = true;
   let contextLost = false;
+  // Pointer in -1..1 (target) and the smoothed value sent to the shader.
+  const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
 
   const draw = () => {
     if (!program || contextLost) return;
@@ -67,12 +71,18 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     gl.useProgram(program.handle);
     gl.uniform2f(program.uResolution, canvas.width, canvas.height);
     gl.uniform1f(program.uTime, elapsed);
+    gl.uniform2f(program.uPointer, pointer.x, pointer.y);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
   const loop = (now: number) => {
     if (lastFrame !== null) {
-      elapsed += Math.min((now - lastFrame) / 1000, MAX_FRAME_SECONDS);
+      const dt = Math.min((now - lastFrame) / 1000, MAX_FRAME_SECONDS);
+      elapsed += dt;
+      // Frame-rate independent easing towards the pointer.
+      const follow = 1 - Math.exp(-dt * POINTER_FOLLOW);
+      pointer.x += (pointer.targetX - pointer.x) * follow;
+      pointer.y += (pointer.targetY - pointer.y) * follow;
     }
     lastFrame = now;
     draw();
@@ -139,6 +149,13 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     else setState("unsupported");
   };
 
+  const onPointerMove = (event: PointerEvent) => {
+    pointer.targetX = (event.clientX / window.innerWidth) * 2 - 1;
+    // Flipped: WebGL's y axis points up.
+    pointer.targetY = 1 - (event.clientY / window.innerHeight) * 2;
+  };
+
+  window.addEventListener("pointermove", onPointerMove, { passive: true });
   canvas.addEventListener("webglcontextlost", onContextLost);
   canvas.addEventListener("webglcontextrestored", onContextRestored);
   document.addEventListener("visibilitychange", update);
@@ -149,6 +166,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
 
   return () => {
     cancelAnimationFrame(frameId);
+    window.removeEventListener("pointermove", onPointerMove);
     resizeObserver.disconnect();
     intersectionObserver.disconnect();
     canvas.removeEventListener("webglcontextlost", onContextLost);
@@ -163,6 +181,7 @@ type FieldProgram = {
   handle: WebGLProgram;
   uResolution: WebGLUniformLocation | null;
   uTime: WebGLUniformLocation | null;
+  uPointer: WebGLUniformLocation | null;
 };
 
 function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
@@ -187,6 +206,7 @@ function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
     handle,
     uResolution: gl.getUniformLocation(handle, "uResolution"),
     uTime: gl.getUniformLocation(handle, "uTime"),
+    uPointer: gl.getUniformLocation(handle, "uPointer"),
   };
 }
 
