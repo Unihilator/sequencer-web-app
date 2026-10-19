@@ -13,7 +13,10 @@ import {
 
 // One store + engine per mounted sequencer (like an @EnvironmentObject),
 // instead of a module-level singleton that would leak between SSR requests.
-const SequencerContext = createContext<SequencerStore | null>(null);
+const SequencerContext = createContext<{
+  store: SequencerStore;
+  engine: AudioEngine;
+} | null>(null);
 
 export function SequencerProvider({
   initialPattern,
@@ -22,7 +25,7 @@ export function SequencerProvider({
   initialPattern?: Pattern;
   children: React.ReactNode;
 }) {
-  const [{ store, engine }] = useState(() => {
+  const [value] = useState(() => {
     const pattern = initialPattern ?? createEmptyPattern();
     const engine = new AudioEngine(pattern);
     return {
@@ -31,6 +34,7 @@ export function SequencerProvider({
     };
   });
 
+  const { store, engine } = value;
   useEffect(() => {
     const disconnect = connectEngine(store, engine);
     return () => {
@@ -40,7 +44,7 @@ export function SequencerProvider({
   }, [store, engine]);
 
   return (
-    <SequencerContext.Provider value={store}>
+    <SequencerContext.Provider value={value}>
       {children}
     </SequencerContext.Provider>
   );
@@ -52,9 +56,18 @@ export function useSequencer<T>(selector: (state: SequencerState) => T): T {
 
 /** Raw store, for reading state in event handlers without re-rendering. */
 export function useSequencerStore(): SequencerStore {
-  const store = useContext(SequencerContext);
-  if (!store) {
+  return useSequencerContext().store;
+}
+
+/** The engine itself; only for diagnostics, everything else goes via the store. */
+export function useSequencerEngine(): AudioEngine {
+  return useSequencerContext().engine;
+}
+
+function useSequencerContext() {
+  const value = useContext(SequencerContext);
+  if (!value) {
     throw new Error("useSequencer must be used inside <SequencerProvider>");
   }
-  return store;
+  return value;
 }

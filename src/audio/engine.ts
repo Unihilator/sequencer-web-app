@@ -11,6 +11,16 @@ export type EngineStatus = "idle" | "loading" | "ready" | "error";
 
 type StepListener = (step: number) => void;
 type PlayingListener = (isPlaying: boolean) => void;
+type DebugListener = (line: string) => void;
+
+/** Live engine state for the hidden diagnostics panel (?debug=audio). */
+export type EngineDiagnostics = {
+  contextState: string;
+  contextTime: number;
+  transportState: string;
+  playing: boolean;
+  contextsCreated: number;
+};
 
 type Strip = {
   voice: Voice;
@@ -36,6 +46,8 @@ export class AudioEngine {
   private contextStale = false;
   private stepListeners = new Set<StepListener>();
   private playingListeners = new Set<PlayingListener>();
+  private debugListeners = new Set<DebugListener>();
+  private contextsCreated = 0;
 
   constructor(pattern: Pattern) {
     this.pattern = pattern;
@@ -56,13 +68,19 @@ export class AudioEngine {
 
   private async load(): Promise<void> {
     preferPlaybackAudioSession();
+    this.debug("load: importing tone");
     const Tone = await import("tone");
+    this.watchContext(Tone);
+    this.debug(`load: resume… (context ${Tone.getContext().state})`);
     await Tone.start();
     this.tone = Tone;
+    this.debug("load: resumed");
     this.buildGraph(Tone);
     this.applyPattern(this.pattern);
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", this.onVisibilityChange);
+      window.addEventListener("pagehide", this.onPageLifecycle);
+      window.addEventListener("pageshow", this.onPageLifecycle);
     }
   }
 
@@ -80,17 +98,24 @@ export class AudioEngine {
   async play(atTime?: number): Promise<void> {
     // Both steps run synchronously inside the user gesture: browsers only
     // create or resume an audible AudioContext from a gesture.
+    this.debug(`play: called${this.contextStale ? " (stale context)" : ""}`);
     if (this.contextStale) this.replaceContext();
     const resumed = this.tone?.start();
     await this.init();
-    await resumed;
+    if (resumed) {
+      this.debug("play: resume…");
+      await resumed;
+      this.debug("play: resumed");
+    }
     const Tone = this.tone;
     if (!Tone) return;
     const transport = Tone.getTransport();
     transport.stop();
     transport.position = 0;
     this.stepCounter = 0;
-    transport.start(atTime ?? Tone.now() + START_DELAY);
+    const startAt = atTime ?? Tone.now() + START_DELAY;
+    transport.start(startAt);
+    this.debug(`play: transport.start(${startAt.toFixed(3)})`);
     this.setPlaying(true);
   }
 
@@ -101,6 +126,7 @@ export class AudioEngine {
     // the playhead does not reappear after Stop.
     this.tone.getDraw().cancel();
     this.setPlaying(false);
+    this.debug("stop");
   }
 
   onStep(listener: StepListener): () => void {
@@ -113,6 +139,23 @@ export class AudioEngine {
     return () => this.playingListeners.delete(listener);
   }
 
+  /** Timestamped log of audio lifecycle events, for on-device debugging. */
+  onDebug(listener: DebugListener): () => void {
+    this.debugListeners.add(listener);
+    return () => this.debugListeners.delete(listener);
+  }
+
+  diagnostics(): EngineDiagnostics {
+    const context = this.tone?.getContext();
+    return {
+      contextState: context?.rawContext.state ?? "none",
+      contextTime: context?.currentTime ?? 0,
+      transportState: this.tone?.getTransport().state ?? "none",
+      playing: this.playing,
+      contextsCreated: this.contextsCreated,
+    };
+  }
+
   /**
    * Releases all audio nodes and the scheduler. The engine can be used again
    * afterwards: the next play() rebuilds the graph.
@@ -120,6 +163,8 @@ export class AudioEngine {
   dispose(): void {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", this.onVisibilityChange);
+      window.removeEventListener("pagehide", this.onPageLifecycle);
+      window.removeEventListener("pageshow", this.onPageLifecycle);
     }
     this.stop();
     this.teardownGraph();
@@ -135,8 +180,25 @@ export class AudioEngine {
     if (!Tone) return;
     this.teardownGraph();
     Tone.setContext(new Tone.Context(), true);
+    this.watchContext(Tone);
+    this.debug("replaceContext: new AudioContext");
     this.buildGraph(Tone);
     this.applyPattern(this.pattern);
+  }
+
+  private watchContext(Tone: Tone): void {
+    this.contextsCreated += 1;
+    const id = this.contextsCreated;
+    Tone.getContext().on("statechange", (state) =>
+      this.debug(`context #${id}: ${state}`),
+    );
+  }
+
+  private debug(message: string): void {
+    if (this.debugListeners.size === 0) return;
+    const { contextState, contextTime } = this.diagnostics();
+    const line = `${(performance.now() / 1000).toFixed(2)}s [${contextState} ${contextTime.toFixed(2)}] ${message}`;
+    for (const listener of this.debugListeners) listener(line);
   }
 
   private teardownGraph(): void {
@@ -232,9 +294,14 @@ export class AudioEngine {
   // AudioContext (or resume it silent). Stop cleanly instead of continuing
   // mid-bar with stuck notes, and start the next Play on a fresh context.
   private onVisibilityChange = () => {
+    this.debug(`visibility: ${document.visibilityState}`);
     if (document.visibilityState !== "hidden" || !this.tone) return;
     this.stop();
     this.contextStale = true;
+  };
+
+  private onPageLifecycle = (event: PageTransitionEvent) => {
+    this.debug(`${event.type}${event.persisted ? " (bfcache)" : ""}`);
   };
 }
 

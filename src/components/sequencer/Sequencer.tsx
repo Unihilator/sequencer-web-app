@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect } from "react";
+import { AudioDebugPanel } from "./AudioDebugPanel";
 import { PatternFromUrl } from "./PatternFromUrl";
 import { SequencerGrid } from "./SequencerGrid";
 import { SequencerProvider, useSequencer } from "./SequencerProvider";
@@ -14,6 +15,7 @@ export function Sequencer() {
       <div className="flex flex-col gap-6">
         <Suspense fallback={null}>
           <PatternFromUrl />
+          <AudioDebugPanel />
         </Suspense>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <TransportBar />

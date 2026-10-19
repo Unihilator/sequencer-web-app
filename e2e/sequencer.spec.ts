@@ -139,6 +139,18 @@ test.describe("sequencer", () => {
   });
 });
 
+test("hidden audio debug panel logs playback events", async ({ page }) => {
+  await page.goto("/sequencer");
+  await expect(page.getByLabel("Діагностика аудіо")).toHaveCount(0);
+
+  await page.goto("/sequencer?debug=audio");
+  const panel = page.getByRole("region", { name: "Діагностика аудіо" });
+  await expect(panel).toBeVisible();
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect(panel).toContainText("play: transport.start");
+  await expect(panel).toContainText("context: running");
+});
+
 test.describe("sharing", () => {
   test("share link restores the pattern", async ({ page, context }) => {
     await page.goto("/sequencer");
