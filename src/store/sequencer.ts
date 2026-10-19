@@ -62,8 +62,16 @@ export function createSequencerStore(options: {
       get().isPlaying ? Promise.resolve(get().stop()) : get().play(),
   }));
 
-  // Engine ⇄ store wiring. Like a Combine sink on @Published: the engine
-  // follows the pattern; the store mirrors the engine's playback state.
+  return store;
+}
+
+// Engine ⇄ store wiring. Like a Combine sink on @Published: the engine
+// follows the pattern; the store mirrors the engine's playback state.
+// Returns a disconnect function (React effects may connect twice).
+export function connectEngine(
+  store: SequencerStore,
+  engine: SequencerEngine,
+): () => void {
   engine.setPattern(store.getState().pattern);
   const unsubscribers = [
     store.subscribe((state, prev) => {
@@ -76,8 +84,5 @@ export function createSequencerStore(options: {
       ),
     ),
   ];
-
-  return Object.assign(store, {
-    destroy: () => unsubscribers.forEach((unsubscribe) => unsubscribe()),
-  });
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }

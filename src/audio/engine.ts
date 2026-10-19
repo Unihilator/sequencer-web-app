@@ -103,6 +103,10 @@ export class AudioEngine {
     return () => this.playingListeners.delete(listener);
   }
 
+  /**
+   * Releases all audio nodes and the scheduler. The engine can be used again
+   * afterwards: the next play() rebuilds the graph.
+   */
   dispose(): void {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", this.onVisibilityChange);
@@ -115,8 +119,9 @@ export class AudioEngine {
     for (const node of this.disposables) node.dispose();
     this.strips.clear();
     this.disposables = [];
-    this.stepListeners.clear();
-    this.playingListeners.clear();
+    this.repeatId = null;
+    this.tone = null;
+    this.loading = null;
   }
 
   private buildGraph(Tone: Tone): void {

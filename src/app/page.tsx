@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { openGraph } from "@/lib/seo";
 import { siteConfig } from "@/lib/site";
 
@@ -21,6 +22,12 @@ export default function Home() {
         iOS-розробник із 15+ роками досвіду. Тут скоро зʼявляться мої
         застосунки, статті та онлайн-секвенсер.
       </p>
+      <Link
+        href="/sequencer"
+        className="w-fit rounded-full bg-foreground px-5 py-2 font-medium text-background transition-opacity hover:opacity-90"
+      >
+        Спробувати секвенсер
+      </Link>
     </main>
   );
 }

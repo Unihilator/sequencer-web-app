@@ -2,7 +2,7 @@
 // Tone is passed in (not imported) so the library is only loaded on demand.
 
 import type * as ToneLib from "tone";
-import { type Note, type TrackId } from "./pattern";
+import { type MelodicTrackId, type Note, type TrackId } from "./pattern";
 
 type Tone = typeof ToneLib;
 
@@ -16,9 +16,16 @@ export type Voice = {
 
 // Two octaves of C minor pentatonic, indexed by scale degree.
 const PENTATONIC = ["C", "Eb", "F", "G", "Bb"];
-export function noteName(degree: Note, baseOctave: number): string {
+function noteName(degree: Note, baseOctave: number): string {
   const octave = baseOctave + Math.floor(degree / PENTATONIC.length);
   return `${PENTATONIC[degree % PENTATONIC.length]}${octave}`;
+}
+
+const BASE_OCTAVE: Record<MelodicTrackId, number> = { bass: 1, synth: 4 };
+
+/** Pitch name of a melodic step, e.g. "Eb1" (shared by audio and UI). */
+export function melodicNoteName(track: MelodicTrackId, degree: Note): string {
+  return noteName(degree, BASE_OCTAVE[track]);
 }
 
 export function createVoices(Tone: Tone): Record<TrackId, Voice> {
@@ -224,7 +231,7 @@ function bass(Tone: Tone): Voice {
     output: synth,
     trigger: (time, note) => {
       if (note === null) return;
-      synth.triggerAttackRelease(noteName(note, 1), "16n", time);
+      synth.triggerAttackRelease(melodicNoteName("bass", note), "16n", time);
     },
     dispose: () => synth.dispose(),
   };
@@ -249,7 +256,7 @@ function lead(Tone: Tone): Voice {
     output: synth,
     trigger: (time, note) => {
       if (note === null) return;
-      synth.triggerAttackRelease(noteName(note, 4), "16n", time);
+      synth.triggerAttackRelease(melodicNoteName("synth", note), "16n", time);
     },
     dispose: () => synth.dispose(),
   };

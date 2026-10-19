@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, test, vi } from "vitest";
-import { createSequencerStore, type SequencerEngine } from "./sequencer";
+import {
+  connectEngine,
+  createSequencerStore,
+  type SequencerEngine,
+} from "./sequencer";
 
 function fakeEngine() {
   const stepListeners = new Set<(step: number) => void>();
@@ -31,6 +35,7 @@ describe("sequencer store", () => {
   test("dispatch updates the pattern and forwards it to the engine", () => {
     const { engine } = fakeEngine();
     const store = createSequencerStore({ engine });
+    connectEngine(store, engine);
     store.getState().dispatch({ type: "toggleStep", track: "kick", step: 0 });
     const pattern = store.getState().pattern;
     expect(pattern.tracks[0].steps[0]).toBe(true);
@@ -40,6 +45,7 @@ describe("sequencer store", () => {
   test("mirrors engine playback state and current step", async () => {
     const { engine, emitStep } = fakeEngine();
     const store = createSequencerStore({ engine });
+    connectEngine(store, engine);
 
     await store.getState().togglePlay();
     expect(engine.play).toHaveBeenCalledOnce();
@@ -64,14 +70,16 @@ describe("sequencer store", () => {
     engine.play.mockRejectedValueOnce(new Error("blocked"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const store = createSequencerStore({ engine });
+    connectEngine(store, engine);
     await store.getState().play();
     expect(store.getState().engineStatus).toBe("error");
   });
 
-  test("destroy stops listening to the engine", () => {
+  test("disconnect stops listening to the engine", () => {
     const { engine, emitStep } = fakeEngine();
     const store = createSequencerStore({ engine });
-    store.destroy();
+    const disconnect = connectEngine(store, engine);
+    disconnect();
     emitStep(3);
     expect(store.getState().currentStep).toBe(-1);
   });
