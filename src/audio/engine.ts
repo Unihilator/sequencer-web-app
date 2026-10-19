@@ -46,8 +46,6 @@ export class AudioEngine {
   private repeatId: number | null = null;
   private stepCounter = 0;
   private playing = false;
-  // Set when the page goes to the background; see onVisibilityChange.
-  private contextStale = false;
   private stepListeners = new Set<StepListener>();
   private playingListeners = new Set<PlayingListener>();
   private debugListeners = new Set<DebugListener>();
@@ -107,13 +105,10 @@ export class AudioEngine {
 
   /** Starts from step 0 at `atTime` (AudioContext seconds) or right away. */
   async play(atTime?: number): Promise<void> {
-    // Both steps run synchronously inside the user gesture: browsers only
-    // create or resume an audible AudioContext from a gesture.
-    this.debug(`play: called${this.contextStale ? " (stale context)" : ""}`);
-    // Re-applied on every gesture: Safari may deactivate the page's audio
-    // session while it is in the background.
+    this.debug("play: called");
+    // Synchronously inside the user gesture: browsers only resume an
+    // AudioContext (and accept a session type change) from a gesture.
     applyAudioSessionType(this.sessionType);
-    if (this.contextStale) this.replaceContext();
     const resumed = this.tone?.start();
     await this.init();
     if (resumed) {
@@ -193,20 +188,6 @@ export class AudioEngine {
     this.teardownGraph();
     this.tone = null;
     this.loading = null;
-    this.contextStale = false;
-  }
-
-  // Swaps in a brand-new AudioContext and rebuilds the graph on it.
-  private replaceContext(): void {
-    this.contextStale = false;
-    const Tone = this.tone;
-    if (!Tone) return;
-    this.teardownGraph();
-    Tone.setContext(new Tone.Context(), true);
-    this.watchContext(Tone);
-    this.debug("replaceContext: new AudioContext");
-    this.buildGraph(Tone);
-    this.applyPattern(this.pattern);
   }
 
   private watchContext(Tone: Tone): void {
@@ -270,7 +251,11 @@ export class AudioEngine {
       const step = this.stepCounter % pattern.length;
       this.stepCounter += 1;
       for (const track of pattern.tracks) this.triggerTrack(track, step, time);
-      Tone.getDraw().schedule(() => this.emitStep(step), time);
+      // rAF does not run in background tabs: skip the playhead there instead
+      // of queueing callbacks that would only be thrown away.
+      if (document.visibilityState === "visible") {
+        Tone.getDraw().schedule(() => this.emitStep(step), time);
+      }
     }, "16n");
   }
 
@@ -313,14 +298,24 @@ export class AudioEngine {
     for (const listener of this.playingListeners) listener(playing);
   }
 
-  // Safari interrupts audio in background tabs and may never resume that
-  // AudioContext (or resume it silent). Stop cleanly instead of continuing
-  // mid-bar with stuck notes, and start the next Play on a fresh context.
+  // Playback continues in background tabs, like a music app. Some browsers
+  // (iOS Safari) still suspend the AudioContext there; when the page is
+  // visible again, resume it so the beat carries on without a new Play.
   private onVisibilityChange = () => {
     this.debug(`visibility: ${document.visibilityState}`);
-    if (document.visibilityState !== "hidden" || !this.tone) return;
-    this.stop();
-    this.contextStale = true;
+    const context = this.tone?.getContext();
+    if (
+      document.visibilityState === "visible" &&
+      this.playing &&
+      context &&
+      context.state !== "running"
+    ) {
+      this.debug("visibility: resuming context…");
+      context.resume().then(
+        () => this.debug("visibility: resumed"),
+        (error: unknown) => this.debug(`visibility: resume failed ${error}`),
+      );
+    }
   };
 
   private onPageLifecycle = (event: PageTransitionEvent) => {

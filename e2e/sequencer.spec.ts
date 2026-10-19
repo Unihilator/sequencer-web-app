@@ -78,9 +78,9 @@ test.describe("sequencer", () => {
     expect(errors).toEqual([]);
   });
 
-  // Safari can leave a backgrounded AudioContext "interrupted" forever.
-  // Simulate that: hide the page, break the context, come back, press Play.
-  test("plays again after the tab was in the background", async ({ page }) => {
+  // Playback carries on in background tabs. iOS Safari may still suspend
+  // the AudioContext there: simulate that and expect an automatic resume.
+  test("keeps playing through a trip to another tab", async ({ page }) => {
     await page.addInitScript(() => {
       const Native = window.AudioContext;
       const created: AudioContext[] = [];
@@ -93,6 +93,21 @@ test.describe("sequencer", () => {
       };
     });
     await page.reload();
+    const contextState = () =>
+      page.evaluate(() => {
+        const { __contexts: contexts } = window as unknown as {
+          __contexts: AudioContext[];
+        };
+        return contexts[contexts.length - 1]?.state;
+      });
+    const setVisibility = (value: DocumentVisibilityState) =>
+      page.evaluate((value) => {
+        Object.defineProperty(document, "visibilityState", {
+          value,
+          configurable: true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, value);
 
     await page
       .getByRole("button", { name: "Kick, крок 1", exact: true })
@@ -100,42 +115,26 @@ test.describe("sequencer", () => {
     await page.getByRole("button", { name: "Play" }).click();
     await expect(page.locator("[data-current]").first()).toBeVisible();
 
+    await setVisibility("hidden");
     await page.evaluate(async () => {
-      const setVisibility = (value: DocumentVisibilityState) => {
-        Object.defineProperty(document, "visibilityState", {
-          value,
-          configurable: true,
-        });
-        document.dispatchEvent(new Event("visibilitychange"));
-      };
       const { __contexts: contexts } = window as unknown as {
         __contexts: AudioContext[];
       };
-      const broken = contexts[contexts.length - 1];
-      setVisibility("hidden");
-      await broken.suspend();
-      broken.resume = () => new Promise<void>(() => {});
-      setVisibility("visible");
+      await contexts[contexts.length - 1].suspend();
     });
-    await expect(page.getByRole("button", { name: "Play" })).toHaveAttribute(
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveAttribute(
       "aria-pressed",
-      "false",
+      "true",
     );
+    expect(await contextState()).toBe("suspended");
 
-    await page.getByRole("button", { name: "Play" }).click();
+    await setVisibility("visible");
+    await expect.poll(contextState).toBe("running");
     await expect(page.getByRole("button", { name: "Stop" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     await expect(page.locator("[data-current]").first()).toBeVisible();
-    expect(
-      await page.evaluate(() => {
-        const { __contexts: contexts } = window as unknown as {
-          __contexts: AudioContext[];
-        };
-        return contexts[contexts.length - 1].state;
-      }),
-    ).toBe("running");
   });
 });
 
