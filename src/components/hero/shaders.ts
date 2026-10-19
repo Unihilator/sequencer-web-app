@@ -1,5 +1,8 @@
 // GLSL (WebGL2 / GLSL ES 3.00) for the hero field.
 
+// Size of the trail uniform array (vec4 each; WebGL2 guarantees 224).
+export const TRAIL_POINTS = 48;
+
 // One triangle that covers the whole screen, generated from gl_VertexID, so
 // no vertex buffers are needed.
 export const VERTEX_SHADER = /* glsl */ `#version 300 es
@@ -25,6 +28,10 @@ uniform vec3 uBackground;
 uniform vec3 uAccent;
 uniform vec3 uAccentSoft;
 uniform vec3 uSignal;
+// Pointer trail, oldest first: x, y (same space as uv), life 1..0, and
+// 1.0 when a segment joins it to the previous point.
+uniform vec4 uTrail[${TRAIL_POINTS}];
+uniform int uTrailCount;
 
 out vec4 outColor;
 
@@ -56,6 +63,27 @@ float fbm(vec2 p) {
     amplitude *= 0.5;
   }
   return value;
+}
+
+// Glow of the pointer trail at uv: the brightest segment wins, so joints
+// don't double up. Segments thin out and dim as they age.
+float trailGlow(vec2 uv) {
+  float glow = 0.0;
+  for (int i = 1; i < ${TRAIL_POINTS}; i++) {
+    if (i >= uTrailCount) break;
+    vec4 b = uTrail[i];
+    if (b.w < 0.5) continue;
+    vec4 a = uTrail[i - 1];
+    vec2 ab = b.xy - a.xy;
+    float h = clamp(dot(uv - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    float d = length(uv - a.xy - ab * h);
+    float life = mix(a.z, b.z, h);
+    float width = 0.004 + 0.006 * life;
+    float core = smoothstep(width, 0.0, d);
+    float halo = exp(-d * d / (0.0016 * life + 1e-5));
+    glow = max(glow, (core + 0.45 * halo) * life * life);
+  }
+  return glow;
 }
 
 void main() {
@@ -90,6 +118,12 @@ void main() {
 
   // Foreground wisps occlude the light: a dark silhouette in front.
   color = mix(color, uBackground * 0.7, near * 0.6);
+
+  // The trail is light inside the smoke: brighter where the field is dense.
+  if (uTrailCount > 1) {
+    float glow = trailGlow(uv);
+    color += mix(uAccentSoft, vec3(1.0), 0.35 * glow) * glow * (0.55 + 0.6 * f);
+  }
 
   // Cinematic vignette.
   float vignette = smoothstep(1.45, 0.25, length(uv * vec2(0.85, 1.1)));

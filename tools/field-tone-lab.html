@@ -386,12 +386,21 @@ uniform float uTime;
 uniform vec2 uPointer;
 uniform vec3 uBackground, uAccent, uAccentSoft, uSignal;
 uniform float uBrightness, uGlints, uGrain;
+uniform vec4 uTrail[48];
+uniform int uTrailCount;
 out vec4 outColor;
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
 float fbm(vec2 p) { float v = 0.0; float a = 0.5; mat2 r = mat2(0.8, 0.6, -0.6, 0.8);
   for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02; a *= 0.5; } return v; }
+float trailGlow(vec2 uv) { float glow = 0.0;
+  for (int i = 1; i < 48; i++) { if (i >= uTrailCount) break; vec4 b = uTrail[i]; if (b.w < 0.5) continue; vec4 a = uTrail[i - 1];
+    vec2 ab = b.xy - a.xy; float h = clamp(dot(uv - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    float d = length(uv - a.xy - ab * h); float life = mix(a.z, b.z, h);
+    float core = smoothstep(0.004 + 0.006 * life, 0.0, d); float halo = exp(-d * d / (0.0016 * life + 1e-5));
+    glow = max(glow, (core + 0.45 * halo) * life * life); }
+  return glow; }
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
   float t = uTime * 0.022;
@@ -408,6 +417,7 @@ void main() {
   float light = smoothstep(1.6, 0.0, length(uv - vec2(0.55, 0.4)));
   color *= (0.55 + 0.75 * light) * uBrightness;
   color = mix(color, uBackground * 0.7, near * 0.6);
+  if (uTrailCount > 1) { float glow = trailGlow(uv); color += mix(uAccentSoft, vec3(1.0), 0.35 * glow) * glow * (0.55 + 0.6 * f); }
   float vignette = smoothstep(1.45, 0.25, length(uv * vec2(0.85, 1.1)));
   color = mix(uBackground * 0.6, color, mix(0.3, 1.0, vignette));
   float luma = dot(color, vec3(0.299, 0.587, 0.114));
@@ -521,10 +531,27 @@ void main() {
   addEventListener("resize", resize);
   resize();
   const ptr = { x: 0, y: 0, tx: 0, ty: 0 };
+  // Pointer trail, simplified from src/components/hero/trail.ts.
+  const trail = [];
+  const trailData = new Float32Array(48 * 4);
+  let trailOpen = false;
   addEventListener("pointermove", (e) => {
     ptr.tx = (e.clientX / innerWidth) * 2 - 1;
     ptr.ty = 1 - (e.clientY / innerHeight) * 2;
+    const x = (e.clientX - innerWidth / 2) / innerHeight;
+    const y = (innerHeight / 2 - e.clientY) / innerHeight;
+    const head = trail.at(-1);
+    const now = performance.now() / 1000;
+    if (trailOpen && head && Math.hypot(x - head.x, y - head.y) < 0.01)
+      Object.assign(head, { x, y, t: now });
+    else trail.push({ x, y, t: now, c: trailOpen });
+    trailOpen = true;
+    if (trail.length > 48) trail.shift().c = false;
   });
+  document.documentElement.addEventListener(
+    "mouseleave",
+    () => (trailOpen = false),
+  );
   let time = 12,
     last = null;
   function frame(now) {
@@ -547,6 +574,14 @@ void main() {
     gl.uniform1f(U("uBrightness"), state.bright);
     gl.uniform1f(U("uGlints"), state.glints);
     gl.uniform1f(U("uGrain"), state.grain);
+    const nowS = performance.now() / 1000;
+    while (trail.length && nowS - trail[0].t > 1.2) trail.shift();
+    if (trail.length) trail[0].c = false;
+    trail.forEach((p, i) =>
+      trailData.set([p.x, p.y, 1 - (nowS - p.t) / 1.2, p.c ? 1 : 0], i * 4),
+    );
+    gl.uniform4fv(U("uTrail"), trailData);
+    gl.uniform1i(U("uTrailCount"), trail.length);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
   }

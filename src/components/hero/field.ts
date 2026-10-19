@@ -1,7 +1,8 @@
 // Imperative WebGL2 renderer for the hero field. No React: the component only
 // mounts a canvas and calls startField(), like the audio engine split.
 
-import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders";
+import { FRAGMENT_SHADER, TRAIL_POINTS, VERTEX_SHADER } from "./shaders";
+import { Trail, toFieldSpace } from "./trail";
 
 export type FieldState =
   "loading" | "running" | "paused" | "static" | "unsupported";
@@ -16,6 +17,10 @@ const START_TIME = 12;
 const MAX_FRAME_SECONDS = 0.1;
 // How quickly the parallax follows the pointer (per second); lower = lazier.
 const POINTER_FOLLOW = 2.5;
+// The pointer trail: seconds a point glows, and the smallest step (in units
+// of canvas height) that adds a new point.
+const TRAIL_LIFETIME = 1.2;
+const TRAIL_MIN_STEP = 0.01;
 
 type Rgb = [number, number, number];
 
@@ -99,6 +104,12 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   let contextLost = false;
   // Pointer in -1..1 (target) and the smoothed value sent to the shader.
   const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
+  const trail = new Trail({
+    lifetime: TRAIL_LIFETIME,
+    maxPoints: TRAIL_POINTS,
+    minDistance: TRAIL_MIN_STEP,
+  });
+  const trailData = new Float32Array(TRAIL_POINTS * 4);
 
   const draw = () => {
     if (!program || contextLost) return;
@@ -107,6 +118,12 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     gl.uniform2f(program.uResolution, canvas.width, canvas.height);
     gl.uniform1f(program.uTime, elapsed);
     gl.uniform2f(program.uPointer, pointer.x, pointer.y);
+    // Only a live animation has a trail; still frames are drawn without it.
+    const trailCount = frameId
+      ? trail.pack(performance.now() / 1000, trailData)
+      : 0;
+    gl.uniform4fv(program.uTrail, trailData);
+    gl.uniform1i(program.uTrailCount, trailCount);
     for (const name of Object.keys(palette) as PaletteUniform[]) {
       gl.uniform3fv(program.palette[name], palette[name]);
     }
@@ -146,6 +163,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
       cancelAnimationFrame(frameId);
       frameId = 0;
     }
+    trail.clear();
     draw();
     setState(reducedMotion.matches ? "static" : "paused");
   };
@@ -191,9 +209,33 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     pointer.targetX = (event.clientX / window.innerWidth) * 2 - 1;
     // Flipped: WebGL's y axis points up.
     pointer.targetY = 1 - (event.clientY / window.innerHeight) * 2;
+    // Touches are traced by the touch listeners below, which keep firing
+    // while the page scrolls (pointer events are cancelled by scrolling).
+    if (event.pointerType !== "touch") addTrailPoint(event);
   };
 
+  const addTrailPoint = (position: { clientX: number; clientY: number }) => {
+    if (!frameId) return;
+    const { x, y } = toFieldSpace(
+      position.clientX,
+      position.clientY,
+      canvas.getBoundingClientRect(),
+    );
+    trail.add(x, y, performance.now() / 1000);
+  };
+  const liftTrail = () => trail.lift();
+  const onTouchStart = (event: TouchEvent) => {
+    trail.lift();
+    addTrailPoint(event.touches[0]);
+  };
+  const onTouchMove = (event: TouchEvent) => addTrailPoint(event.touches[0]);
+
   window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("touchstart", onTouchStart, { passive: true });
+  window.addEventListener("touchmove", onTouchMove, { passive: true });
+  window.addEventListener("touchend", liftTrail);
+  window.addEventListener("touchcancel", liftTrail);
+  document.documentElement.addEventListener("mouseleave", liftTrail);
   canvas.addEventListener("webglcontextlost", onContextLost);
   canvas.addEventListener("webglcontextrestored", onContextRestored);
   document.addEventListener("visibilitychange", update);
@@ -205,6 +247,11 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   return () => {
     cancelAnimationFrame(frameId);
     window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("touchstart", onTouchStart);
+    window.removeEventListener("touchmove", onTouchMove);
+    window.removeEventListener("touchend", liftTrail);
+    window.removeEventListener("touchcancel", liftTrail);
+    document.documentElement.removeEventListener("mouseleave", liftTrail);
     resizeObserver.disconnect();
     intersectionObserver.disconnect();
     canvas.removeEventListener("webglcontextlost", onContextLost);
@@ -220,6 +267,8 @@ type FieldProgram = {
   uResolution: WebGLUniformLocation | null;
   uTime: WebGLUniformLocation | null;
   uPointer: WebGLUniformLocation | null;
+  uTrail: WebGLUniformLocation | null;
+  uTrailCount: WebGLUniformLocation | null;
   palette: Record<PaletteUniform, WebGLUniformLocation | null>;
 };
 
@@ -246,6 +295,8 @@ function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
     uResolution: gl.getUniformLocation(handle, "uResolution"),
     uTime: gl.getUniformLocation(handle, "uTime"),
     uPointer: gl.getUniformLocation(handle, "uPointer"),
+    uTrail: gl.getUniformLocation(handle, "uTrail"),
+    uTrailCount: gl.getUniformLocation(handle, "uTrailCount"),
     palette: {
       uBackground: gl.getUniformLocation(handle, "uBackground"),
       uAccent: gl.getUniformLocation(handle, "uAccent"),
