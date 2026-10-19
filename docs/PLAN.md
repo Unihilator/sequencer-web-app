@@ -13,7 +13,7 @@
 - [x] 👤 Акаунт Vercel, імпорт репозиторію, перший деплой (preview + production)
 - [x] 👤 Обрати і купити домен (Cloudflare Registrar; варіанти: імʼя.dev / .com / .me) — imsequencer.dev
 - [x] 👤 Налаштувати DNS у Cloudflare → Vercel, перевірити HTTPS і редирект www ↔ apex
-- [ ] 👤 Cloudflare Email Routing: hello@домен → особиста пошта
+- [x] 👤 Cloudflare Email Routing: hello@домен → особиста пошта
 - [x] Пояснити мені, як працює вся ланка: домен → DNS → CDN → хостинг → SSL
 
 ## Етап 1 — Прототип секвенсера
