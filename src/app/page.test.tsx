@@ -1,12 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import { siteConfig } from "@/lib/site";
+import { HERO_TITLE } from "@/components/hero/copy";
 import Page from "./page";
 
-test("home page renders the owner's name as the main heading", () => {
+test("home page leads with the content, not the owner's name", () => {
   render(<Page />);
   expect(screen.getByRole("main")).toBeDefined();
   expect(
-    screen.getByRole("heading", { level: 1, name: siteConfig.name }),
+    screen.getByRole("heading", { level: 1, name: HERO_TITLE }),
+  ).toBeDefined();
+  expect(
+    screen.getByRole("link", { name: "Спробувати секвенсер" }),
   ).toBeDefined();
 });

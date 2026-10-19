@@ -5,7 +5,7 @@ test("home page renders with metadata", async ({ page }) => {
   await expect(page).toHaveTitle(/Roman Derkach/);
   await expect(page.locator("html")).toHaveAttribute("lang", "uk");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Roman Derkach" }),
+    page.getByRole("heading", { level: 1, name: "Звук, який можна побачити" }),
   ).toBeVisible();
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
@@ -51,7 +51,10 @@ test.describe("hero field", () => {
     await expect(canvas(page)).toHaveAttribute("data-state", "unsupported");
     await expect(canvas(page)).toBeHidden();
     await expect(
-      page.getByRole("heading", { level: 1, name: "Roman Derkach" }),
+      page.getByRole("heading", {
+        level: 1,
+        name: "Звук, який можна побачити",
+      }),
     ).toBeVisible();
   });
 });

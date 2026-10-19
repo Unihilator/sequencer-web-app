@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HERO_TITLE } from "@/components/hero/copy";
 import { HeroBackground } from "@/components/hero/HeroBackground";
 import { openGraph } from "@/lib/seo";
 import { siteConfig } from "@/lib/site";
@@ -24,10 +25,11 @@ export default function Home() {
             iOS · звук · веб
           </p>
           <h1 className="font-display text-headline font-medium">
-            {siteConfig.name}
+            {HERO_TITLE}
           </h1>
           <p className="max-w-xl text-lg text-foreground/80">
-            15+ років роблю iOS-застосунки. Тут експериментую з вебом і звуком.
+            Онлайн-секвенсер, генеративна графіка та інші експерименти зі звуком
+            просто в браузері.
           </p>
           <Link
             href="/sequencer"
