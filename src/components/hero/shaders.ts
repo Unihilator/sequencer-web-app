@@ -1,7 +1,9 @@
 // GLSL (WebGL2 / GLSL ES 3.00) for the hero field.
 
-// Size of the trail uniform array (vec4 each; WebGL2 guarantees 224).
-export const TRAIL_POINTS = 96;
+import { TRAIL_REACH } from "./trail";
+
+// The trail pass stores glow / TRAIL_GLOW_SCALE so it fits an 8-bit texture.
+const TRAIL_GLOW_SCALE = "2.0";
 
 // One triangle that covers the whole screen, generated from gl_VertexID, so
 // no vertex buffers are needed.
@@ -28,12 +30,8 @@ uniform vec3 uBackground;
 uniform vec3 uAccent;
 uniform vec3 uAccentSoft;
 uniform vec3 uSignal;
-// Pointer trail, oldest first: x, y (same space as uv), life 1..0, and
-// 1.0 when a segment joins it to the previous point.
-uniform vec4 uTrail[${TRAIL_POINTS}];
-uniform int uTrailCount;
-// Box around the trail and its glow (min.xy, max.xy); nothing to do outside.
-uniform vec4 uTrailBounds;
+// Glow of the pointer trail, drawn by the trail pass at the same size.
+uniform sampler2D uTrailGlow;
 
 out vec4 outColor;
 
@@ -65,28 +63,6 @@ float fbm(vec2 p) {
     amplitude *= 0.5;
   }
   return value;
-}
-
-// Glow of the pointer trail at uv: the brightest segment wins, so joints
-// don't double up. Segments thin out and dim as they age.
-float trailGlow(vec2 uv) {
-  float glow = 0.0;
-  for (int i = 1; i < ${TRAIL_POINTS}; i++) {
-    if (i >= uTrailCount) break;
-    vec4 b = uTrail[i];
-    if (b.w < 0.5) continue;
-    vec4 a = uTrail[i - 1];
-    vec2 ab = b.xy - a.xy;
-    float h = clamp(dot(uv - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-    float d = length(uv - a.xy - ab * h);
-    float life = mix(a.z, b.z, h);
-    float width = 0.004 + 0.006 * life;
-    float core = smoothstep(width, 0.0, d);
-    float halo = exp(-d * d / (0.0016 * life + 1e-5));
-    // Stays bright for most of its life, dims only near the end.
-    glow = max(glow, (core + 0.45 * halo) * smoothstep(0.0, 0.7, life));
-  }
-  return glow;
 }
 
 void main() {
@@ -123,10 +99,9 @@ void main() {
   color = mix(color, uBackground * 0.7, near * 0.6);
 
   // The trail is light inside the smoke: brighter where the field is dense.
-  bool nearTrail = all(greaterThanEqual(uv, uTrailBounds.xy)) &&
-    all(lessThanEqual(uv, uTrailBounds.zw));
-  if (uTrailCount > 1 && nearTrail) {
-    float glow = trailGlow(uv);
+  float glow =
+    texelFetch(uTrailGlow, ivec2(gl_FragCoord.xy), 0).r * ${TRAIL_GLOW_SCALE};
+  if (glow > 0.0) {
     color += mix(uAccentSoft, vec3(1.0), 0.35 * glow) * glow * (0.55 + 0.6 * f);
   }
 
@@ -140,5 +115,56 @@ void main() {
   color += grain * (0.042 + 0.15 * luma);
 
   outColor = vec4(color, 1.0);
+}
+`;
+
+// Trail pass: one quad per segment (see buildTrailMesh), drawn into a
+// texture with MAX blending so that overlapping capsules don't add up.
+export const TRAIL_VERTEX_SHADER = /* glsl */ `#version 300 es
+uniform vec2 uResolution;
+// Field space: origin at the centre, y up, units of canvas height.
+in vec2 aPosition;
+// Position inside the segment's capsule: along it (0..length), across it.
+in vec2 aLocal;
+in float aLength;
+// Life at the start and the end of the segment.
+in vec2 aLife;
+out vec2 vLocal;
+flat out float vLength;
+flat out vec2 vLife;
+
+void main() {
+  vLocal = aLocal;
+  vLength = aLength;
+  vLife = aLife;
+  gl_Position = vec4(
+    aPosition.x * 2.0 * uResolution.y / uResolution.x,
+    aPosition.y * 2.0,
+    0.0,
+    1.0
+  );
+}
+`;
+
+export const TRAIL_FRAGMENT_SHADER = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vLocal;
+flat in float vLength;
+flat in vec2 vLife;
+out vec4 outColor;
+
+const float REACH = ${TRAIL_REACH.toFixed(4)};
+
+void main() {
+  // Distance to the segment: zero along it, round beyond its ends.
+  float along = clamp(vLocal.x, 0.0, vLength);
+  float d = length(vec2(vLocal.x - along, vLocal.y));
+  float life = mix(vLife.x, vLife.y, along / max(vLength, 1e-6));
+  // A bright core that thins with age, and a soft halo around it.
+  float core = smoothstep(0.004 + 0.006 * life, 0.0, d);
+  float halo = exp(-d * d / (0.0016 * life + 1e-5)) * smoothstep(REACH, 0.6 * REACH, d);
+  // Stays bright for most of its life, dims only near the end.
+  float glow = (core + 0.45 * halo) * smoothstep(0.0, 0.7, life);
+  outColor = vec4(glow / ${TRAIL_GLOW_SCALE}, 0.0, 0.0, 1.0);
 }
 `;

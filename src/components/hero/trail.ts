@@ -24,7 +24,9 @@ export type TrailOptions = {
   minDistance: number;
 };
 
-type CurvePoint = { x: number; y: number; life: number };
+export type CurvePoint = { x: number; y: number; life: number };
+/** A curve point; `connected` is false where a new stroke starts. */
+export type FittedPoint = CurvePoint & { connected: boolean };
 
 // The spline puts a point about every SUBDIVISION_LENGTH (units of canvas
 // height, ~2px on a laptop screen) along each raw segment.
@@ -93,14 +95,11 @@ export class Trail {
   }
 
   /**
-   * Packs the trail as vec4s for the shader: x, y, life (1 = fresh,
-   * 0 = gone) and 1/0 for "connected to the previous point". The raw points
-   * are smoothed into a curve, then thinned where the line is straight, so
-   * the shader's straight segments read as one continuous curve.
-   * Returns the number of points written.
+   * The trail as a smooth curve, ready to draw: the raw points are smoothed
+   * with a spline, then thinned where the line is straight, to at most
+   * `capacity` points. Life runs from 1 (fresh) to 0 (gone).
    */
-  pack(now: number, target: Float32Array): number {
-    const capacity = Math.floor(target.length / 4);
+  curve(now: number, capacity: number): FittedPoint[] {
     const idle = this.idleLife(now);
     const curves = this.strokes(now).map((stroke) =>
       smoothStroke(
@@ -112,14 +111,7 @@ export class Trail {
         })),
       ),
     );
-    const packed = fitToCapacity(curves, capacity);
-    packed.forEach((point, i) =>
-      target.set(
-        [point.x, point.y, point.life, point.connected ? 1 : 0],
-        i * 4,
-      ),
-    );
-    return packed.length;
+    return fitToCapacity(curves, capacity);
   }
 
   /** 1 while the pointer moves, then down to 0 over `idleFade`. */
@@ -213,7 +205,7 @@ function centripetal(
 export function fitToCapacity(
   curves: CurvePoint[][],
   capacity: number,
-): (CurvePoint & { connected: boolean })[] {
+): FittedPoint[] {
   let tolerance = FIT_TOLERANCE;
   let fitted = curves.map((curve) => simplify(curve, tolerance));
   const count = () => fitted.reduce((sum, curve) => sum + curve.length, 0);
@@ -272,6 +264,61 @@ function distanceToSegment(p: CurvePoint, a: CurvePoint, b: CurvePoint) {
           Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared),
         );
   return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
+}
+
+// Floats per vertex in the mesh: position (2), position inside the segment's
+// capsule (along, across), segment length, life at its start and end.
+export const TRAIL_VERTEX_FLOATS = 7;
+// How far the glow reaches from the line; each segment's quad is this much
+// larger than the segment on every side (see the trail shader).
+export const TRAIL_REACH = 0.08;
+
+/**
+ * Triangles for the trail: one quad around every segment, two triangles
+ * each. The fragment shader turns the local coordinates into the distance
+ * to the segment, so every quad draws a soft capsule; overlapping capsules
+ * merge at the joints (blended with MAX).
+ * Returns the vertex count; `out` must hold TRAIL_VERTEX_FLOATS * 6 per
+ * segment.
+ */
+export function buildTrailMesh(
+  points: readonly FittedPoint[],
+  out: Float32Array,
+): number {
+  let vertices = 0;
+  const capacity = Math.floor(out.length / (TRAIL_VERTEX_FLOATS * 6));
+  for (let i = 1; i < points.length && vertices / 6 < capacity; i++) {
+    const b = points[i];
+    if (!b.connected) continue;
+    const a = points[i - 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    // Direction along the segment and its normal (any for a zero length).
+    const dx = length > 0 ? (b.x - a.x) / length : 1;
+    const dy = length > 0 ? (b.y - a.y) / length : 0;
+    const corner = (along: number, across: number) => {
+      out.set(
+        [
+          a.x + dx * along - dy * across,
+          a.y + dy * along + dx * across,
+          along,
+          across,
+          length,
+          a.life,
+          b.life,
+        ],
+        vertices * TRAIL_VERTEX_FLOATS,
+      );
+      vertices++;
+    };
+    const r = TRAIL_REACH;
+    corner(-r, -r);
+    corner(length + r, -r);
+    corner(length + r, r);
+    corner(-r, -r);
+    corner(length + r, r);
+    corner(-r, r);
+  }
+  return vertices;
 }
 
 /**

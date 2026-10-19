@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { fitToCapacity, smoothStroke, Trail, toFieldSpace } from "./trail";
+import {
+  buildTrailMesh,
+  fitToCapacity,
+  type FittedPoint,
+  smoothStroke,
+  Trail,
+  TRAIL_REACH,
+  TRAIL_VERTEX_FLOATS,
+  toFieldSpace,
+} from "./trail";
 
 const makeTrail = (maxPoints = 4) =>
   new Trail({
@@ -62,30 +71,42 @@ describe("Trail", () => {
     expect(points[0].connected).toBe(false);
   });
 
-  test("packs x, y, remaining life and the connected flag", () => {
+  test("returns a curve with remaining life and stroke starts", () => {
     const trail = makeTrail();
     trail.add(0, 0, 0);
     trail.add(0.2, 0.1, 0.5);
-    const target = new Float32Array(4 * 4);
-    expect(trail.pack(0.6, target)).toBe(2); // a straight line needs no more
-    // First point: start of the stroke, 40% of its life left.
-    [0, 0, 0.4, 0].forEach((value, i) => expect(target[i]).toBeCloseTo(value));
-    // Last point: the head, connected, 90% left.
-    [0.2, 0.1, 0.9, 1].forEach((value, i) =>
-      expect(target[4 + i]).toBeCloseTo(value),
-    );
+    const curve = trail.curve(0.6, 64);
+    expect(curve).toHaveLength(2); // a straight line needs no more
+    // Start of the stroke with 40% of its life left; the head with 90%.
+    expect(curve[0]).toMatchObject({ x: 0, y: 0, connected: false });
+    expect(curve[0].life).toBeCloseTo(0.4);
+    expect(curve[1]).toMatchObject({ x: 0.2, y: 0.1, connected: true });
+    expect(curve[1].life).toBeCloseTo(0.9);
   });
 
   test("fades the whole trail once the pointer rests", () => {
     const trail = makeTrail();
     trail.add(0, 0, 0);
     trail.add(0.2, 0, 0.1);
-    const target = new Float32Array(8 * 4);
     // Resting past idleDelay (0.2) for half of idleFade (0.5).
-    trail.pack(0.55, target);
-    expect(target[2]).toBeCloseTo((1 - 0.55) * 0.5);
-    expect(trail.pack(0.8, target)).toBe(0);
+    expect(trail.curve(0.55, 64)[0].life).toBeCloseTo((1 - 0.55) * 0.5);
+    expect(trail.curve(0.8, 64)).toHaveLength(0);
   });
+
+  // Straight segments between the curve points are what gets drawn; even
+  // their midpoints must sit on the circle that was drawn.
+  const midpointError = (curve: FittedPoint[], radius: number) => {
+    let worst = 0;
+    for (let i = 1; i < curve.length; i++) {
+      const a = curve[i - 1];
+      const b = curve[i];
+      // The open ends leave straight by design; check the closed middle.
+      if (Math.abs(Math.atan2(a.y, a.x)) < Math.PI / 6) continue;
+      const middle = Math.hypot((a.x + b.x) / 2, (a.y + b.y) / 2);
+      worst = Math.max(worst, Math.abs(middle - radius));
+    }
+    return worst;
+  };
 
   test("smooths a coarse circle into a round curve", () => {
     const trail = makeTrail(64);
@@ -93,21 +114,28 @@ describe("Trail", () => {
       const angle = (i / 12) * Math.PI * 2;
       trail.add(0.3 * Math.cos(angle), 0.3 * Math.sin(angle), i * 0.01);
     }
-    const target = new Float32Array(64 * 4);
-    const count = trail.pack(0.12, target);
-    expect(count).toBeLessThanOrEqual(64);
-    const at = (i: number) => ({ x: target[i * 4], y: target[i * 4 + 1] });
-    for (let i = 1; i < count; i++) {
-      // The shader draws straight segments; even their midpoints must sit
-      // on the circle (the raw 12-gon is 0.01 off in the middle of a side).
-      const a = at(i - 1);
-      const b = at(i);
-      // The open ends leave straight by design; check the closed middle.
-      const angle = Math.atan2(a.y, a.x);
-      if (Math.abs(angle) < Math.PI / 6) continue;
-      const middle = Math.hypot((a.x + b.x) / 2, (a.y + b.y) / 2);
-      expect(Math.abs(middle - 0.3)).toBeLessThan(0.002);
+    const curve = trail.curve(0.12, 64);
+    expect(curve.length).toBeLessThanOrEqual(64);
+    // The raw 12-gon is 0.01 off in the middle of a side.
+    expect(midpointError(curve, 0.3)).toBeLessThan(0.002);
+  });
+
+  test("keeps many loops round", () => {
+    // Six circles in a row, the case that used to turn into polygons.
+    const trail = new Trail({
+      lifetime: 10,
+      idleDelay: 1,
+      idleFade: 1,
+      maxPoints: 1024,
+      minDistance: 0.006,
+    });
+    for (let i = 0; i <= 6 * 40; i++) {
+      const angle = (i / 40) * Math.PI * 2;
+      trail.add(0.25 * Math.cos(angle), 0.25 * Math.sin(angle), i * 0.01);
     }
+    const curve = trail.curve(2.4, 1024);
+    expect(curve.length).toBeLessThanOrEqual(1024);
+    expect(midpointError(curve, 0.25)).toBeLessThan(0.002);
   });
 
   test("handles unevenly spaced points without loops", () => {
@@ -153,6 +181,51 @@ describe("fitToCapacity", () => {
       false,
       true,
     ]);
+  });
+});
+
+describe("buildTrailMesh", () => {
+  const point = (x: number, connected: boolean): FittedPoint => ({
+    x,
+    y: 0,
+    life: 1,
+    connected,
+  });
+
+  test("draws one quad (six vertices) per connected segment", () => {
+    const out = new Float32Array(16 * 6 * TRAIL_VERTEX_FLOATS);
+    // Two strokes: 0 → 0.1 → 0.2, then 0.5 → 0.6.
+    const points = [
+      point(0, false),
+      point(0.1, true),
+      point(0.2, true),
+      point(0.5, false),
+      point(0.6, true),
+    ];
+    expect(buildTrailMesh(points, out)).toBe(3 * 6);
+  });
+
+  test("covers the segment plus the glow reach around it", () => {
+    const out = new Float32Array(6 * TRAIL_VERTEX_FLOATS);
+    buildTrailMesh([point(0, false), point(0.1, true)], out);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let v = 0; v < 6; v++) {
+      xs.push(out[v * TRAIL_VERTEX_FLOATS]);
+      ys.push(out[v * TRAIL_VERTEX_FLOATS + 1]);
+      // Segment length travels with every vertex for the fragment shader.
+      expect(out[v * TRAIL_VERTEX_FLOATS + 4]).toBeCloseTo(0.1);
+    }
+    expect(Math.min(...xs)).toBeCloseTo(-TRAIL_REACH);
+    expect(Math.max(...xs)).toBeCloseTo(0.1 + TRAIL_REACH);
+    expect(Math.min(...ys)).toBeCloseTo(-TRAIL_REACH);
+    expect(Math.max(...ys)).toBeCloseTo(TRAIL_REACH);
+  });
+
+  test("stops when the buffer is full", () => {
+    const out = new Float32Array(6 * TRAIL_VERTEX_FLOATS);
+    const points = [point(0, false), point(0.1, true), point(0.2, true)];
+    expect(buildTrailMesh(points, out)).toBe(6);
   });
 });
 

@@ -1,8 +1,18 @@
 // Imperative WebGL2 renderer for the hero field. No React: the component only
 // mounts a canvas and calls startField(), like the audio engine split.
 
-import { FRAGMENT_SHADER, TRAIL_POINTS, VERTEX_SHADER } from "./shaders";
-import { Trail, toFieldSpace } from "./trail";
+import {
+  FRAGMENT_SHADER,
+  TRAIL_FRAGMENT_SHADER,
+  TRAIL_VERTEX_SHADER,
+  VERTEX_SHADER,
+} from "./shaders";
+import {
+  buildTrailMesh,
+  Trail,
+  TRAIL_VERTEX_FLOATS,
+  toFieldSpace,
+} from "./trail";
 
 export type FieldState =
   "loading" | "running" | "paused" | "static" | "unsupported";
@@ -23,12 +33,12 @@ const TRAIL = {
   lifetime: 3.5,
   idleDelay: 0.35,
   idleFade: 0.7,
-  maxPoints: 256,
+  maxPoints: 1024,
   // In units of canvas height; the spline fills in between.
   minDistance: 0.006,
 };
-// Beyond this distance from the line the glow is invisible (see shaders.ts).
-const TRAIL_GLOW_REACH = 0.15;
+// Most points the smoothed trail may have; each becomes a quad on the GPU.
+const TRAIL_CURVE_POINTS = 1024;
 
 type Rgb = [number, number, number];
 
@@ -64,35 +74,6 @@ function readPalette(): Record<PaletteUniform, Rgb> {
   };
 }
 
-/**
- * Box around the packed trail (min x, min y, max x, max y), grown by how far
- * the glow reaches; the shader skips the trail outside it.
- */
-export function trailBounds(
-  data: Float32Array,
-  count: number,
-): [number, number, number, number] {
-  if (count === 0) return [0, 0, -1, -1]; // empty: contains nothing
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (let i = 0; i < count; i++) {
-    const x = data[i * 4];
-    const y = data[i * 4 + 1];
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-  }
-  return [
-    minX - TRAIL_GLOW_REACH,
-    minY - TRAIL_GLOW_REACH,
-    maxX + TRAIL_GLOW_REACH,
-    maxY + TRAIL_GLOW_REACH,
-  ];
-}
-
 /** Size of the drawing buffer for a canvas of the given CSS size. */
 export function renderSize(
   cssWidth: number,
@@ -126,8 +107,8 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     return () => {};
   }
 
-  let program = createProgram(gl);
-  if (!program) {
+  let renderer = createRenderer(gl);
+  if (!renderer) {
     setState("unsupported");
     return () => {};
   }
@@ -142,24 +123,58 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   // Pointer in -1..1 (target) and the smoothed value sent to the shader.
   const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
   const trail = new Trail(TRAIL);
-  const trailData = new Float32Array(TRAIL_POINTS * 4);
+  const trailMesh = new Float32Array(
+    TRAIL_CURVE_POINTS * 6 * TRAIL_VERTEX_FLOATS,
+  );
+  // Whether the glow texture holds anything (skip clearing an empty one).
+  let glowDrawn = false;
 
   const draw = () => {
-    if (!program || contextLost) return;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.useProgram(program.handle);
-    gl.uniform2f(program.uResolution, canvas.width, canvas.height);
-    gl.uniform1f(program.uTime, elapsed);
-    gl.uniform2f(program.uPointer, pointer.x, pointer.y);
-    // Only a live animation has a trail; still frames are drawn without it.
-    const trailCount = frameId
-      ? trail.pack(performance.now() / 1000, trailData)
-      : 0;
-    gl.uniform4fv(program.uTrail, trailData);
-    gl.uniform1i(program.uTrailCount, trailCount);
-    gl.uniform4fv(program.uTrailBounds, trailBounds(trailData, trailCount));
+    if (!renderer || contextLost) return;
+    const { field, glow } = renderer;
+    const { width, height } = canvas;
+    gl.viewport(0, 0, width, height);
+
+    // Pass 1: the trail into the glow texture. Only a live animation has a
+    // trail; still frames are drawn without it.
+    const points = frameId
+      ? trail.curve(performance.now() / 1000, TRAIL_CURVE_POINTS)
+      : [];
+    const vertices = buildTrailMesh(points, trailMesh);
+    if (vertices > 0 || glowDrawn) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, glow.framebuffer);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      if (vertices > 0) {
+        gl.useProgram(glow.program);
+        gl.uniform2f(glow.uResolution, width, height);
+        gl.bindVertexArray(glow.vertexArray);
+        gl.bindBuffer(gl.ARRAY_BUFFER, glow.buffer);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          trailMesh.subarray(0, vertices * TRAIL_VERTEX_FLOATS),
+          gl.DYNAMIC_DRAW,
+        );
+        gl.enable(gl.BLEND);
+        gl.blendEquation(gl.MAX);
+        gl.drawArrays(gl.TRIANGLES, 0, vertices);
+        gl.disable(gl.BLEND);
+      }
+      glowDrawn = vertices > 0;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    // Pass 2: the field, lit by the glow.
+    gl.useProgram(field.program);
+    gl.bindVertexArray(field.vertexArray);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, glow.texture);
+    gl.uniform1i(field.uTrailGlow, 0);
+    gl.uniform2f(field.uResolution, width, height);
+    gl.uniform1f(field.uTime, elapsed);
+    gl.uniform2f(field.uPointer, pointer.x, pointer.y);
     for (const name of Object.keys(palette) as PaletteUniform[]) {
-      gl.uniform3fv(program.palette[name], palette[name]);
+      gl.uniform3fv(field.palette[name], palette[name]);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
@@ -211,6 +226,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
+      if (renderer) sizeGlowTexture(gl, renderer.glow.texture, width, height);
       // Resizing clears the buffer; repaint right away when not animating.
       if (!frameId) draw();
     }
@@ -229,14 +245,17 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     contextLost = true;
     cancelAnimationFrame(frameId);
     frameId = 0;
-    program = null;
+    renderer = null; // its GPU objects died with the context
     setState("loading"); // hides the canvas; the CSS fallback shows through
   };
   const onContextRestored = () => {
     contextLost = false;
-    program = createProgram(gl);
-    if (program) update();
-    else setState("unsupported");
+    renderer = createRenderer(gl);
+    glowDrawn = false;
+    if (renderer) {
+      sizeGlowTexture(gl, renderer.glow.texture, canvas.width, canvas.height);
+      update();
+    } else setState("unsupported");
   };
 
   const onPointerMove = (event: PointerEvent) => {
@@ -285,6 +304,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   document.addEventListener("visibilitychange", update);
   reducedMotion.addEventListener("change", update);
 
+  sizeGlowTexture(gl, renderer.glow.texture, canvas.width, canvas.height);
   resize();
   update();
 
@@ -302,54 +322,155 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     canvas.removeEventListener("webglcontextrestored", onContextRestored);
     document.removeEventListener("visibilitychange", update);
     reducedMotion.removeEventListener("change", update);
-    if (program) gl.deleteProgram(program.handle);
+    if (renderer) deleteRenderer(gl, renderer);
   };
 }
 
-type FieldProgram = {
-  handle: WebGLProgram;
-  uResolution: WebGLUniformLocation | null;
-  uTime: WebGLUniformLocation | null;
-  uPointer: WebGLUniformLocation | null;
-  uTrail: WebGLUniformLocation | null;
-  uTrailCount: WebGLUniformLocation | null;
-  uTrailBounds: WebGLUniformLocation | null;
-  palette: Record<PaletteUniform, WebGLUniformLocation | null>;
+type Renderer = {
+  field: {
+    program: WebGLProgram;
+    vertexArray: WebGLVertexArrayObject;
+    uResolution: WebGLUniformLocation | null;
+    uTime: WebGLUniformLocation | null;
+    uPointer: WebGLUniformLocation | null;
+    uTrailGlow: WebGLUniformLocation | null;
+    palette: Record<PaletteUniform, WebGLUniformLocation | null>;
+  };
+  glow: {
+    program: WebGLProgram;
+    vertexArray: WebGLVertexArrayObject;
+    buffer: WebGLBuffer;
+    texture: WebGLTexture;
+    framebuffer: WebGLFramebuffer;
+    uResolution: WebGLUniformLocation | null;
+  };
 };
 
-function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
-  const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
-  const handle = gl.createProgram();
-  if (!vertex || !fragment || !handle) return null;
-  gl.attachShader(handle, vertex);
-  gl.attachShader(handle, fragment);
-  gl.linkProgram(handle);
+function createRenderer(gl: WebGL2RenderingContext): Renderer | null {
+  const fieldProgram = link(gl, VERTEX_SHADER, FRAGMENT_SHADER);
+  const glowProgram = link(gl, TRAIL_VERTEX_SHADER, TRAIL_FRAGMENT_SHADER);
+  if (!fieldProgram || !glowProgram) return null;
+
+  // The field's vertex shader needs no attributes, but drawing requires a
+  // VAO bound.
+  const fieldVertexArray = gl.createVertexArray();
+
+  // Trail quads: interleaved floats, layout as in buildTrailMesh.
+  const glowVertexArray = gl.createVertexArray();
+  const buffer = gl.createBuffer();
+  gl.bindVertexArray(glowVertexArray);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  const stride = TRAIL_VERTEX_FLOATS * 4;
+  const attributes: [string, number, number][] = [
+    ["aPosition", 2, 0],
+    ["aLocal", 2, 2],
+    ["aLength", 1, 4],
+    ["aLife", 2, 5],
+  ];
+  for (const [name, size, offset] of attributes) {
+    const location = gl.getAttribLocation(glowProgram, name);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset * 4);
+  }
+  gl.bindVertexArray(null);
+
+  // The glow lives in a texture the size of the canvas (sized on resize).
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  sizeGlowTexture(gl, texture, 1, 1);
+  const framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    texture,
+    0,
+  );
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  return {
+    field: {
+      program: fieldProgram,
+      vertexArray: fieldVertexArray,
+      uResolution: gl.getUniformLocation(fieldProgram, "uResolution"),
+      uTime: gl.getUniformLocation(fieldProgram, "uTime"),
+      uPointer: gl.getUniformLocation(fieldProgram, "uPointer"),
+      uTrailGlow: gl.getUniformLocation(fieldProgram, "uTrailGlow"),
+      palette: {
+        uBackground: gl.getUniformLocation(fieldProgram, "uBackground"),
+        uAccent: gl.getUniformLocation(fieldProgram, "uAccent"),
+        uAccentSoft: gl.getUniformLocation(fieldProgram, "uAccentSoft"),
+        uSignal: gl.getUniformLocation(fieldProgram, "uSignal"),
+      },
+    },
+    glow: {
+      program: glowProgram,
+      vertexArray: glowVertexArray,
+      buffer,
+      texture,
+      framebuffer,
+      uResolution: gl.getUniformLocation(glowProgram, "uResolution"),
+    },
+  };
+}
+
+function sizeGlowTexture(
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  width: number,
+  height: number,
+) {
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA8,
+    width,
+    height,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    null,
+  );
+}
+
+function deleteRenderer(gl: WebGL2RenderingContext, renderer: Renderer) {
+  const { field, glow } = renderer;
+  gl.deleteProgram(field.program);
+  gl.deleteVertexArray(field.vertexArray);
+  gl.deleteProgram(glow.program);
+  gl.deleteVertexArray(glow.vertexArray);
+  gl.deleteBuffer(glow.buffer);
+  gl.deleteTexture(glow.texture);
+  gl.deleteFramebuffer(glow.framebuffer);
+}
+
+function link(
+  gl: WebGL2RenderingContext,
+  vertexSource: string,
+  fragmentSource: string,
+): WebGLProgram | null {
+  const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  if (!vertex || !fragment || !program) return null;
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
   // Shaders are owned by the program once linked.
   gl.deleteShader(vertex);
   gl.deleteShader(fragment);
-  if (!gl.getProgramParameter(handle, gl.LINK_STATUS)) {
-    console.error("Hero field: link failed", gl.getProgramInfoLog(handle));
-    gl.deleteProgram(handle);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error("Hero field: link failed", gl.getProgramInfoLog(program));
+    gl.deleteProgram(program);
     return null;
   }
-  // The vertex shader needs no attributes, but drawing requires a VAO bound.
-  gl.bindVertexArray(gl.createVertexArray());
-  return {
-    handle,
-    uResolution: gl.getUniformLocation(handle, "uResolution"),
-    uTime: gl.getUniformLocation(handle, "uTime"),
-    uPointer: gl.getUniformLocation(handle, "uPointer"),
-    uTrail: gl.getUniformLocation(handle, "uTrail"),
-    uTrailCount: gl.getUniformLocation(handle, "uTrailCount"),
-    uTrailBounds: gl.getUniformLocation(handle, "uTrailBounds"),
-    palette: {
-      uBackground: gl.getUniformLocation(handle, "uBackground"),
-      uAccent: gl.getUniformLocation(handle, "uAccent"),
-      uAccentSoft: gl.getUniformLocation(handle, "uAccentSoft"),
-      uSignal: gl.getUniformLocation(handle, "uSignal"),
-    },
-  };
+  return program;
 }
 
 function compile(

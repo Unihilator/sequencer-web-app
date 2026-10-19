@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { parseHexColor, renderSize, trailBounds } from "./field";
+import { parseHexColor, renderSize } from "./field";
 
 describe("renderSize", () => {
   test("renders at half resolution on a standard screen", () => {
@@ -31,21 +31,5 @@ describe("parseHexColor", () => {
     expect(parseHexColor("")).toBeNull();
     expect(parseHexColor("#fff")).toBeNull();
     expect(parseHexColor("rgb(0, 0, 0)")).toBeNull();
-  });
-});
-
-describe("trailBounds", () => {
-  test("wraps the points plus the reach of the glow", () => {
-    const data = new Float32Array([0, 0, 1, 0, 0.5, -0.2, 1, 1, 9, 9, 9, 9]);
-    const [minX, minY, maxX, maxY] = trailBounds(data, 2);
-    expect(minX).toBeCloseTo(-0.15);
-    expect(minY).toBeCloseTo(-0.35);
-    expect(maxX).toBeCloseTo(0.65);
-    expect(maxY).toBeCloseTo(0.15);
-  });
-
-  test("is an empty box without points", () => {
-    const [minX, , maxX] = trailBounds(new Float32Array(8), 0);
-    expect(minX).toBeGreaterThan(maxX);
   });
 });
