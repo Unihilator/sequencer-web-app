@@ -2,8 +2,14 @@
 import { describe, expect, test } from "vitest";
 import { Trail, toFieldSpace } from "./trail";
 
-const makeTrail = () =>
-  new Trail({ lifetime: 1, maxPoints: 4, minDistance: 0.01 });
+const makeTrail = (maxPoints = 4) =>
+  new Trail({
+    lifetime: 1,
+    idleDelay: 0.2,
+    idleFade: 0.5,
+    maxPoints,
+    minDistance: 0.01,
+  });
 
 describe("Trail", () => {
   test("connects points within a stroke", () => {
@@ -41,11 +47,11 @@ describe("Trail", () => {
     const trail = makeTrail();
     trail.add(0, 0, 0);
     trail.add(0.1, 0, 0.5);
+    trail.add(0.2, 0, 1.1);
     const points = trail.live(1.2);
-    expect(points).toHaveLength(1);
-    // The survivor no longer has a segment leading into it.
+    expect(points.map((point) => point.x)).toEqual([0.1, 0.2]);
+    // The new oldest point no longer has a segment leading into it.
     expect(points[0].connected).toBe(false);
-    expect(trail.live(2)).toHaveLength(0);
   });
 
   test("keeps at most maxPoints, dropping the oldest", () => {
@@ -61,9 +67,48 @@ describe("Trail", () => {
     trail.add(0, 0, 0);
     trail.add(0.2, 0.1, 0.5);
     const target = new Float32Array(4 * 4);
-    expect(trail.pack(0.75, target)).toBe(2);
-    const expected = [0, 0, 0.25, 0, 0.2, 0.1, 0.75, 1];
-    expected.forEach((value, i) => expect(target[i]).toBeCloseTo(value));
+    expect(trail.pack(0.6, target)).toBe(3); // start, middle, head
+    // First point: start of the stroke, 40% of its life left.
+    [0, 0, 0.4, 0].forEach((value, i) => expect(target[i]).toBeCloseTo(value));
+    // Last point: the head, connected, 90% left.
+    [0.2, 0.1, 0.9, 1].forEach((value, i) =>
+      expect(target[8 + i]).toBeCloseTo(value),
+    );
+  });
+
+  test("fades the whole trail once the pointer rests", () => {
+    const trail = makeTrail();
+    trail.add(0, 0, 0);
+    trail.add(0.2, 0, 0.1);
+    const target = new Float32Array(8 * 4);
+    // Resting past idleDelay (0.2) for half of idleFade (0.5).
+    trail.pack(0.55, target);
+    expect(target[2]).toBeCloseTo((1 - 0.55) * 0.5);
+    expect(trail.pack(0.8, target)).toBe(0);
+  });
+
+  test("smooths a coarse circle into an even, round curve", () => {
+    const trail = makeTrail(64);
+    for (let i = 0; i <= 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      trail.add(0.3 * Math.cos(angle), 0.3 * Math.sin(angle), i * 0.01);
+    }
+    const target = new Float32Array(64 * 4);
+    const count = trail.pack(0.12, target);
+    expect(count).toBeGreaterThan(48);
+    expect(count).toBeLessThanOrEqual(64);
+    const steps: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const x = target[i * 4];
+      const y = target[i * 4 + 1];
+      // Stays close to the circle between the raw points...
+      expect(Math.abs(Math.hypot(x, y) - 0.3)).toBeLessThan(0.01);
+      if (i > 0) {
+        steps.push(Math.hypot(x - target[i * 4 - 4], y - target[i * 4 - 3]));
+      }
+    }
+    // ...with far shorter steps than the 0.157 between the raw points.
+    expect(Math.max(...steps)).toBeLessThan(0.04);
   });
 });
 

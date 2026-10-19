@@ -1,7 +1,7 @@
 // GLSL (WebGL2 / GLSL ES 3.00) for the hero field.
 
 // Size of the trail uniform array (vec4 each; WebGL2 guarantees 224).
-export const TRAIL_POINTS = 48;
+export const TRAIL_POINTS = 64;
 
 // One triangle that covers the whole screen, generated from gl_VertexID, so
 // no vertex buffers are needed.
@@ -81,7 +81,8 @@ float trailGlow(vec2 uv) {
     float width = 0.004 + 0.006 * life;
     float core = smoothstep(width, 0.0, d);
     float halo = exp(-d * d / (0.0016 * life + 1e-5));
-    glow = max(glow, (core + 0.45 * halo) * life * life);
+    // Stays bright for most of its life, dims only near the end.
+    glow = max(glow, (core + 0.45 * halo) * smoothstep(0.0, 0.7, life));
   }
   return glow;
 }

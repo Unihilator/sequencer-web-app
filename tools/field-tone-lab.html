@@ -386,7 +386,7 @@ uniform float uTime;
 uniform vec2 uPointer;
 uniform vec3 uBackground, uAccent, uAccentSoft, uSignal;
 uniform float uBrightness, uGlints, uGrain;
-uniform vec4 uTrail[48];
+uniform vec4 uTrail[64];
 uniform int uTrailCount;
 out vec4 outColor;
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -395,11 +395,11 @@ float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.
 float fbm(vec2 p) { float v = 0.0; float a = 0.5; mat2 r = mat2(0.8, 0.6, -0.6, 0.8);
   for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02; a *= 0.5; } return v; }
 float trailGlow(vec2 uv) { float glow = 0.0;
-  for (int i = 1; i < 48; i++) { if (i >= uTrailCount) break; vec4 b = uTrail[i]; if (b.w < 0.5) continue; vec4 a = uTrail[i - 1];
+  for (int i = 1; i < 64; i++) { if (i >= uTrailCount) break; vec4 b = uTrail[i]; if (b.w < 0.5) continue; vec4 a = uTrail[i - 1];
     vec2 ab = b.xy - a.xy; float h = clamp(dot(uv - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     float d = length(uv - a.xy - ab * h); float life = mix(a.z, b.z, h);
     float core = smoothstep(0.004 + 0.006 * life, 0.0, d); float halo = exp(-d * d / (0.0016 * life + 1e-5));
-    glow = max(glow, (core + 0.45 * halo) * life * life); }
+    glow = max(glow, (core + 0.45 * halo) * smoothstep(0.0, 0.7, life)); }
   return glow; }
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
@@ -533,8 +533,42 @@ void main() {
   const ptr = { x: 0, y: 0, tx: 0, ty: 0 };
   // Pointer trail, simplified from src/components/hero/trail.ts.
   const trail = [];
-  const trailData = new Float32Array(48 * 4);
-  let trailOpen = false;
+  const trailData = new Float32Array(64 * 4);
+  const LIFETIME = 3.5,
+    IDLE_DELAY = 0.35,
+    IDLE_FADE = 0.7;
+  let trailOpen = false,
+    lastMove = -Infinity;
+  const catmull = (p0, p1, p2, p3, t) =>
+    0.5 *
+    (2 * p1 +
+      (p2 - p0) * t +
+      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+      (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
+  function smooth(pts) {
+    if (pts.length < 3) return pts;
+    const out = [],
+      n = pts.length - 1;
+    for (let i = 0; i < n; i++) {
+      const [p0, p1, p2, p3] = [
+        pts[Math.max(i - 1, 0)],
+        pts[i],
+        pts[i + 1],
+        pts[Math.min(i + 2, n)],
+      ];
+      for (let s = 0; s < 6; s++) {
+        const t = s / 6;
+        out.push({
+          x: catmull(p0.x, p1.x, p2.x, p3.x, t),
+          y: catmull(p0.y, p1.y, p2.y, p3.y, t),
+          life: p1.life + (p2.life - p1.life) * t,
+          c: s > 0 ? p2.c : p1.c,
+        });
+      }
+    }
+    out.push(pts[n]);
+    return out;
+  }
   addEventListener("pointermove", (e) => {
     ptr.tx = (e.clientX / innerWidth) * 2 - 1;
     ptr.ty = 1 - (e.clientY / innerHeight) * 2;
@@ -542,11 +576,12 @@ void main() {
     const y = (innerHeight / 2 - e.clientY) / innerHeight;
     const head = trail.at(-1);
     const now = performance.now() / 1000;
+    lastMove = now;
     if (trailOpen && head && Math.hypot(x - head.x, y - head.y) < 0.01)
       Object.assign(head, { x, y, t: now });
     else trail.push({ x, y, t: now, c: trailOpen });
     trailOpen = true;
-    if (trail.length > 48) trail.shift().c = false;
+    if (trail.length > 256) trail.shift().c = false;
   });
   document.documentElement.addEventListener(
     "mouseleave",
@@ -575,13 +610,31 @@ void main() {
     gl.uniform1f(U("uGlints"), state.glints);
     gl.uniform1f(U("uGrain"), state.grain);
     const nowS = performance.now() / 1000;
-    while (trail.length && nowS - trail[0].t > 1.2) trail.shift();
+    const idle = Math.min(
+      1,
+      Math.max(0, 1 - (nowS - lastMove - IDLE_DELAY) / IDLE_FADE),
+    );
+    if (idle === 0) trail.length = 0;
+    while (trail.length && nowS - trail[0].t > LIFETIME) trail.shift();
     if (trail.length) trail[0].c = false;
-    trail.forEach((p, i) =>
-      trailData.set([p.x, p.y, 1 - (nowS - p.t) / 1.2, p.c ? 1 : 0], i * 4),
+    // Smooth, then thin out evenly to fit 64 points (simplified resample).
+    const curve = smooth(
+      trail.map((p) => ({
+        x: p.x,
+        y: p.y,
+        c: p.c,
+        life: idle * Math.max(0, 1 - (nowS - p.t) / LIFETIME),
+      })),
+    );
+    const stride = Math.max(1, Math.ceil(curve.length / 64));
+    const packed = curve
+      .filter((_, i) => i % stride === 0 || i === curve.length - 1)
+      .slice(-64);
+    packed.forEach((p, i) =>
+      trailData.set([p.x, p.y, p.life, i > 0 && p.c ? 1 : 0], i * 4),
     );
     gl.uniform4fv(U("uTrail"), trailData);
-    gl.uniform1i(U("uTrailCount"), trail.length);
+    gl.uniform1i(U("uTrailCount"), packed.length);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
   }

@@ -17,10 +17,16 @@ const START_TIME = 12;
 const MAX_FRAME_SECONDS = 0.1;
 // How quickly the parallax follows the pointer (per second); lower = lazier.
 const POINTER_FOLLOW = 2.5;
-// The pointer trail: seconds a point glows, and the smallest step (in units
-// of canvas height) that adds a new point.
-const TRAIL_LIFETIME = 1.2;
-const TRAIL_MIN_STEP = 0.01;
+// The pointer trail. It stays while the pointer moves (so a whole shape can
+// be drawn), then fades out as one piece once the pointer rests.
+const TRAIL = {
+  lifetime: 3.5,
+  idleDelay: 0.35,
+  idleFade: 0.7,
+  maxPoints: 256,
+  // In units of canvas height; the spline fills in between.
+  minDistance: 0.006,
+};
 
 type Rgb = [number, number, number];
 
@@ -104,11 +110,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   let contextLost = false;
   // Pointer in -1..1 (target) and the smoothed value sent to the shader.
   const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
-  const trail = new Trail({
-    lifetime: TRAIL_LIFETIME,
-    maxPoints: TRAIL_POINTS,
-    minDistance: TRAIL_MIN_STEP,
-  });
+  const trail = new Trail(TRAIL);
   const trailData = new Float32Array(TRAIL_POINTS * 4);
 
   const draw = () => {
