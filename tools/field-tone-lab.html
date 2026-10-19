@@ -1,0 +1,553 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Field Tone Lab</title>
+<!--
+  Dev tool: live palette tuning for the hero field. Open this file directly
+  in a browser. The shader is a copy of src/components/hero/shaders.ts with
+  extra uniforms (brightness, glints, grain, speed); keep them in sync.
+-->
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Manrope:wght@400;600&family=JetBrains+Mono:wght@400&display=swap"
+/>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #eeede8;
+    --muted: #9a99a3;
+    --line: #ffffff22;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: var(--ink);
+    font-family: Manrope, system-ui, sans-serif;
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      to top,
+      var(--bg) 0%,
+      color-mix(in srgb, var(--bg) 50%, transparent) 35%,
+      transparent 70%
+    );
+  }
+  .hero {
+    position: fixed;
+    left: 40px;
+    bottom: 64px;
+    max-width: 560px;
+    display: grid;
+    gap: 18px;
+    pointer-events: none;
+  }
+  .hero .eyebrow {
+    font:
+      12px/1 "JetBrains Mono",
+      monospace;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .hero h1 {
+    margin: 0;
+    font:
+      500 clamp(2rem, 5vw, 3.5rem)/1.05 "Playfair Display",
+      Georgia,
+      serif;
+    letter-spacing: -0.015em;
+  }
+  .hero p {
+    margin: 0;
+    font-size: 18px;
+    color: #eeede8cc;
+  }
+  .hero .cta {
+    width: fit-content;
+    padding: 9px 20px;
+    border-radius: 999px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--cta);
+  }
+
+  .panel {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 320px;
+    max-height: calc(100% - 32px);
+    overflow: auto;
+    background: #0b0b10e6;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    display: grid;
+    gap: 16px;
+    backdrop-filter: blur(10px);
+    font-size: 13px;
+  }
+  .panel h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .panel .hint {
+    margin: 0;
+    color: var(--muted);
+  }
+  .presets {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .presets button {
+    display: grid;
+    gap: 6px;
+    text-align: left;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #ffffff08;
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  .presets button[aria-pressed="true"] {
+    border-color: var(--ink);
+  }
+  .presets button:focus-visible,
+  .panel input:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  .sw {
+    display: flex;
+    gap: 3px;
+  }
+  .sw i {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #ffffff1a;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 92px 1fr 44px;
+    gap: 8px;
+    align-items: center;
+  }
+  .row span:last-child {
+    font:
+      11px/1 "JetBrains Mono",
+      monospace;
+    color: var(--muted);
+    text-align: right;
+  }
+  .colors {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .colors label {
+    display: grid;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .colors input {
+    width: 100%;
+    height: 30px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: none;
+    padding: 0;
+  }
+  .out {
+    display: grid;
+    gap: 6px;
+  }
+  .out code {
+    font:
+      12px/1.4 "JetBrains Mono",
+      monospace;
+    background: #ffffff10;
+    padding: 8px;
+    border-radius: 6px;
+    word-break: break-all;
+  }
+  .out button {
+    justify-self: start;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #ffffff14;
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  @media (max-width: 700px) {
+    .panel {
+      left: 16px;
+      right: 16px;
+      width: auto;
+      top: auto;
+      bottom: 16px;
+      max-height: 50%;
+    }
+    .hero {
+      display: none;
+    }
+  }
+</style>
+
+<canvas id="c"></canvas>
+<div class="scrim"></div>
+<div class="hero">
+  <span class="eyebrow">iOS · звук · веб</span>
+  <h1>Звук, який можна побачити</h1>
+  <p>
+    Онлайн-секвенсер, генеративна графіка та інші експерименти зі звуком просто
+    в браузері.
+  </p>
+  <span class="cta">Спробувати секвенсер</span>
+</div>
+
+<aside class="panel" aria-label="Налаштування тону">
+  <div>
+    <h2>Тон поля</h2>
+    <p class="hint">
+      Оберіть пресет, далі підкрутіть кольори й повзунки. Поводіть мишею: шари
+      рухаються.
+    </p>
+  </div>
+  <div class="presets" id="presets"></div>
+  <div class="colors">
+    <label>Фон<input type="color" id="c-bg" /></label>
+    <label>Основний<input type="color" id="c-accent" /></label>
+    <label>Світлий<input type="color" id="c-soft" /></label>
+    <label>Відблиск<input type="color" id="c-signal" /></label>
+  </div>
+  <div>
+    <div class="row">
+      <label for="s-bright">Яскравість</label
+      ><input
+        type="range"
+        id="s-bright"
+        min="0.4"
+        max="1.8"
+        step="0.05"
+        value="1"
+      /><span id="v-bright"></span>
+    </div>
+    <div class="row">
+      <label for="s-glints">Відблиски</label
+      ><input
+        type="range"
+        id="s-glints"
+        min="0"
+        max="3"
+        step="0.1"
+        value="1"
+      /><span id="v-glints"></span>
+    </div>
+    <div class="row">
+      <label for="s-grain">Зерно</label
+      ><input
+        type="range"
+        id="s-grain"
+        min="0"
+        max="3"
+        step="0.1"
+        value="1"
+      /><span id="v-grain"></span>
+    </div>
+    <div class="row">
+      <label for="s-speed">Швидкість</label
+      ><input
+        type="range"
+        id="s-speed"
+        min="0.2"
+        max="2"
+        step="0.05"
+        value="1"
+      /><span id="v-speed"></span>
+    </div>
+  </div>
+  <div class="out">
+    <h2>Код для чату</h2>
+    <code id="code"></code>
+    <button type="button" id="copy">Копіювати</button>
+  </div>
+</aside>
+
+<script>
+  const PRESETS = [
+    {
+      name: "Сталь",
+      note: "зараз на сайті",
+      bg: "#0b0c14",
+      accent: "#3e7198",
+      soft: "#7aa7ff",
+      signal: "#ff6b4a",
+    },
+    {
+      name: "Ультрамарин",
+      note: "A1",
+      bg: "#0b0c14",
+      accent: "#3d46fb",
+      soft: "#8a90ff",
+      signal: "#ff6b4a",
+    },
+    {
+      name: "Індиго-фіолет",
+      note: "туманність",
+      bg: "#0c0a14",
+      accent: "#5b34d6",
+      soft: "#b9a3ff",
+      signal: "#ff7a9c",
+    },
+    {
+      name: "Петроль",
+      note: "бірюза + помаранч",
+      bg: "#06100f",
+      accent: "#0f6f73",
+      soft: "#7fd8d0",
+      signal: "#ff8a3d",
+    },
+    {
+      name: "Бурштин",
+      note: "теплі сутінки",
+      bg: "#0e0a07",
+      accent: "#9a4416",
+      soft: "#f0b46a",
+      signal: "#ffe2a8",
+    },
+    {
+      name: "Маджента",
+      note: "неон-нуар",
+      bg: "#0e0710",
+      accent: "#8f1d5c",
+      soft: "#ff7ab8",
+      signal: "#ffb36b",
+    },
+    {
+      name: "Смарагд",
+      note: "глибина лісу",
+      bg: "#060d0a",
+      accent: "#146c4b",
+      soft: "#7ee2b0",
+      signal: "#d8ff7a",
+    },
+    {
+      name: "Срібний дим",
+      note: "майже ч/б",
+      bg: "#0a0a0c",
+      accent: "#4b4f5c",
+      soft: "#d9dbe3",
+      signal: "#8a90ff",
+    },
+    {
+      name: "Кобальт + корал",
+      note: "холод і тепло",
+      bg: "#070b14",
+      accent: "#1f4fae",
+      soft: "#7fb2ff",
+      signal: "#ff5a3c",
+    },
+  ];
+
+  const VS = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  const FS = `#version 300 es
+precision highp float;
+uniform vec2 uResolution;
+uniform float uTime;
+uniform vec2 uPointer;
+uniform vec3 uBackground, uAccent, uAccentSoft, uSignal;
+uniform float uBrightness, uGlints, uGrain;
+out vec4 outColor;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+float fbm(vec2 p) { float v = 0.0; float a = 0.5; mat2 r = mat2(0.8, 0.6, -0.6, 0.8);
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02; a *= 0.5; } return v; }
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+  float t = uTime * 0.022;
+  float far = fbm((uv + uPointer * 0.015) * 1.1 + vec2(0.5 * t, -0.3 * t));
+  vec2 p = (uv + uPointer * 0.045) * 1.4;
+  vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, 1.3) - t));
+  vec2 r = vec2(fbm(p + 3.5 * q + vec2(1.7, 9.2) + 1.3 * t), fbm(p + 3.5 * q + vec2(8.3, 2.8) - 0.9 * t));
+  float f = fbm(p + 3.5 * r);
+  float near = smoothstep(0.52, 0.8, fbm((uv + uPointer * 0.13) * 0.9 + vec2(-1.6 * t, 0.9 * t) + 20.0));
+  vec3 color = uBackground + uAccent * 0.16 * smoothstep(0.3, 0.8, far);
+  color = mix(color, uAccent * 0.8, smoothstep(0.22, 0.8, f));
+  color = mix(color, uAccentSoft * 0.75, smoothstep(0.5, 0.95, f) * clamp(length(q), 0.0, 1.0));
+  color += uSignal * 0.22 * uGlints * smoothstep(0.62, 0.9, r.x) * smoothstep(0.5, 0.85, f);
+  float light = smoothstep(1.6, 0.0, length(uv - vec2(0.55, 0.4)));
+  color *= (0.55 + 0.75 * light) * uBrightness;
+  color = mix(color, uBackground * 0.7, near * 0.6);
+  float vignette = smoothstep(1.45, 0.25, length(uv * vec2(0.85, 1.1)));
+  color = mix(uBackground * 0.6, color, mix(0.3, 1.0, vignette));
+  float luma = dot(color, vec3(0.299, 0.587, 0.114));
+  float grain = hash(gl_FragCoord.xy + fract(uTime * 1.37) * 517.0) - 0.5;
+  color += grain * (0.025 + 0.09 * luma) * uGrain;
+  outColor = vec4(color, 1.0);
+}`;
+
+  const $ = (id) => document.getElementById(id);
+  // Defaults match the site (grain and speed are already baked into it).
+  const state = {
+    preset: 0,
+    ...PRESETS[0],
+    bright: 1,
+    glints: 1,
+    grain: 1,
+    speed: 1,
+  };
+
+  // UI
+  const presetsEl = $("presets");
+  PRESETS.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "preset-" + i;
+    b.innerHTML = `<span class="sw"><i style="background:${p.bg}"></i><i style="background:${p.accent}"></i><i style="background:${p.soft}"></i><i style="background:${p.signal}"></i></span><span><strong>${i + 1}. ${p.name}</strong><br><span style="color:var(--muted)">${p.note}</span></span>`;
+    b.addEventListener("click", () => {
+      Object.assign(state, PRESETS[i], { preset: i });
+      syncInputs();
+    });
+    presetsEl.append(b);
+  });
+  const colorInputs = {
+    bg: $("c-bg"),
+    accent: $("c-accent"),
+    soft: $("c-soft"),
+    signal: $("c-signal"),
+  };
+  const sliders = {
+    bright: $("s-bright"),
+    glints: $("s-glints"),
+    grain: $("s-grain"),
+    speed: $("s-speed"),
+  };
+  for (const [k, el] of Object.entries(colorInputs))
+    el.addEventListener("input", () => {
+      state[k] = el.value;
+      state.preset = -1;
+      render();
+    });
+  for (const [k, el] of Object.entries(sliders))
+    el.addEventListener("input", () => {
+      state[k] = Number(el.value);
+      render();
+    });
+  function syncInputs() {
+    for (const [k, el] of Object.entries(colorInputs)) el.value = state[k];
+    for (const [k, el] of Object.entries(sliders)) el.value = state[k];
+    render();
+  }
+  function render() {
+    document
+      .querySelectorAll(".presets button")
+      .forEach((b, i) =>
+        b.setAttribute("aria-pressed", String(i === state.preset)),
+      );
+    for (const k of Object.keys(sliders))
+      $("v-" + k).textContent = state[k].toFixed(2);
+    document.documentElement.style.setProperty("--bg", state.bg);
+    document.documentElement.style.setProperty("--cta", state.accent);
+    const base = state.preset >= 0 ? `${state.preset + 1}` : "custom";
+    $("code").textContent =
+      `${base} bg=${state.bg} accent=${state.accent} soft=${state.soft} signal=${state.signal} bright=${state.bright} glints=${state.glints} grain=${state.grain} speed=${state.speed}`;
+  }
+  $("copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("code").textContent);
+      $("copy").textContent = "Скопійовано";
+    } catch {
+      $("copy").textContent = "Виділіть текст вручну";
+    }
+  });
+  syncInputs();
+
+  // WebGL
+  const canvas = $("c");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
+  function sh(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+  gl.bindVertexArray(gl.createVertexArray());
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const hex = (h) =>
+    [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  function resize() {
+    const s = Math.min(devicePixelRatio || 1, 1.5) * 0.5;
+    canvas.width = Math.max(1, Math.round(innerWidth * s));
+    canvas.height = Math.max(1, Math.round(innerHeight * s));
+  }
+  addEventListener("resize", resize);
+  resize();
+  const ptr = { x: 0, y: 0, tx: 0, ty: 0 };
+  addEventListener("pointermove", (e) => {
+    ptr.tx = (e.clientX / innerWidth) * 2 - 1;
+    ptr.ty = 1 - (e.clientY / innerHeight) * 2;
+  });
+  let time = 12,
+    last = null;
+  function frame(now) {
+    if (last !== null) {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      time += dt * state.speed;
+      const k = 1 - Math.exp(-dt * 2.5);
+      ptr.x += (ptr.tx - ptr.x) * k;
+      ptr.y += (ptr.ty - ptr.y) * k;
+    }
+    last = now;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(U("uResolution"), canvas.width, canvas.height);
+    gl.uniform1f(U("uTime"), time);
+    gl.uniform2f(U("uPointer"), ptr.x, ptr.y);
+    gl.uniform3fv(U("uBackground"), hex(state.bg));
+    gl.uniform3fv(U("uAccent"), hex(state.accent));
+    gl.uniform3fv(U("uAccentSoft"), hex(state.soft));
+    gl.uniform3fv(U("uSignal"), hex(state.signal));
+    gl.uniform1f(U("uBrightness"), state.bright);
+    gl.uniform1f(U("uGlints"), state.glints);
+    gl.uniform1f(U("uGrain"), state.grain);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
