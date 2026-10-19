@@ -22,9 +22,9 @@
 - [x] Модель патерну: 12 треків × 16/32 кроки, BPM 60–200, swing; дії стора — серіалізовувані команди (основа для спільної сесії)
 - [x] Кодування патерну в URL (компактно, base64url, байт версії) + декодування
 - [x] Unit-тести: модель патерну, encode/decode
-- [ ] Інструменти (синтезовані через Tone.js, без семплів): Kick, Snare, Clap, Closed hat, Open hat, Ride, Tom, Perc, FX 1 (crash/impact), FX 2 (riser/zap), Bass (sub/reese), Synth (C minor pentatonic)
-- [ ] Ефекти: спільні reverb і delay, send-рівні на кожному треку
-- [ ] Движок: Tone.Transport + Tone.Draw, старт у заданий момент `play(atTime?)`, ліниве завантаження tone
+- [x] Інструменти (синтезовані через Tone.js, без семплів): Kick, Snare, Clap, Closed hat, Open hat, Ride, Tom, Perc, FX 1 (crash/impact), FX 2 (riser/zap), Bass (sub/reese), Synth (C minor pentatonic)
+- [x] Ефекти: спільні reverb і delay, send-рівні на кожному треку
+- [x] Движок: Tone.Transport + Tone.Draw, старт у заданий момент `play(atTime?)`, ліниве завантаження tone
 - [ ] Zustand-стор, звʼязок UI ↔ движок
 - [ ] Транспорт: play/stop, BPM, swing; пробіл = play/stop
 - [ ] UI сітки: клік/тач, Enter = toggle, ↑/↓ = висота ноти, стрілки = навігація, підсвітка поточного кроку синхронно зі звуком; 2 такти на мобільному
