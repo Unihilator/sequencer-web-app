@@ -417,14 +417,15 @@ void main() {
 }`;
 
   const $ = (id) => document.getElementById(id);
-  // Defaults match the site (grain and speed are already baked into it).
+  // Sliders are relative to this lab's shader (speed 0.022, grain 0.025);
+  // 0.45 and 1.7 reproduce what is baked into the site shader today.
   const state = {
     preset: 0,
     ...PRESETS[0],
     bright: 1,
     glints: 1,
-    grain: 1,
-    speed: 1,
+    grain: 1.7,
+    speed: 0.45,
   };
 
   // UI
