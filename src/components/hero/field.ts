@@ -27,6 +27,8 @@ const TRAIL = {
   // In units of canvas height; the spline fills in between.
   minDistance: 0.006,
 };
+// Beyond this distance from the line the glow is invisible (see shaders.ts).
+const TRAIL_GLOW_REACH = 0.15;
 
 type Rgb = [number, number, number];
 
@@ -60,6 +62,35 @@ function readPalette(): Record<PaletteUniform, Rgb> {
     uAccentSoft: read(PALETTE_TOKENS.uAccentSoft),
     uSignal: read(PALETTE_TOKENS.uSignal),
   };
+}
+
+/**
+ * Box around the packed trail (min x, min y, max x, max y), grown by how far
+ * the glow reaches; the shader skips the trail outside it.
+ */
+export function trailBounds(
+  data: Float32Array,
+  count: number,
+): [number, number, number, number] {
+  if (count === 0) return [0, 0, -1, -1]; // empty: contains nothing
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const x = data[i * 4];
+    const y = data[i * 4 + 1];
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return [
+    minX - TRAIL_GLOW_REACH,
+    minY - TRAIL_GLOW_REACH,
+    maxX + TRAIL_GLOW_REACH,
+    maxY + TRAIL_GLOW_REACH,
+  ];
 }
 
 /** Size of the drawing buffer for a canvas of the given CSS size. */
@@ -126,6 +157,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
       : 0;
     gl.uniform4fv(program.uTrail, trailData);
     gl.uniform1i(program.uTrailCount, trailCount);
+    gl.uniform4fv(program.uTrailBounds, trailBounds(trailData, trailCount));
     for (const name of Object.keys(palette) as PaletteUniform[]) {
       gl.uniform3fv(program.palette[name], palette[name]);
     }
@@ -213,18 +245,28 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     pointer.targetY = 1 - (event.clientY / window.innerHeight) * 2;
     // Touches are traced by the touch listeners below, which keep firing
     // while the page scrolls (pointer events are cancelled by scrolling).
-    if (event.pointerType !== "touch") addTrailPoint(event);
+    if (event.pointerType === "touch") return;
+    // The browser delivers one pointermove per frame; the positions in
+    // between (up to ~1000 per second) wait in the coalesced list. Without
+    // them a curve drawn during a slow frame turns into a straight line.
+    const coalesced =
+      typeof event.getCoalescedEvents === "function"
+        ? event.getCoalescedEvents()
+        : [];
+    addTrailPoints(coalesced.length > 0 ? coalesced : [event]);
   };
 
-  const addTrailPoint = (position: { clientX: number; clientY: number }) => {
+  type Position = { clientX: number; clientY: number };
+  const addTrailPoints = (positions: readonly Position[]) => {
     if (!frameId) return;
-    const { x, y } = toFieldSpace(
-      position.clientX,
-      position.clientY,
-      canvas.getBoundingClientRect(),
-    );
-    trail.add(x, y, performance.now() / 1000);
+    const rect = canvas.getBoundingClientRect();
+    const now = performance.now() / 1000;
+    for (const position of positions) {
+      const { x, y } = toFieldSpace(position.clientX, position.clientY, rect);
+      trail.add(x, y, now);
+    }
   };
+  const addTrailPoint = (position: Position) => addTrailPoints([position]);
   const liftTrail = () => trail.lift();
   const onTouchStart = (event: TouchEvent) => {
     trail.lift();
@@ -271,6 +313,7 @@ type FieldProgram = {
   uPointer: WebGLUniformLocation | null;
   uTrail: WebGLUniformLocation | null;
   uTrailCount: WebGLUniformLocation | null;
+  uTrailBounds: WebGLUniformLocation | null;
   palette: Record<PaletteUniform, WebGLUniformLocation | null>;
 };
 
@@ -299,6 +342,7 @@ function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
     uPointer: gl.getUniformLocation(handle, "uPointer"),
     uTrail: gl.getUniformLocation(handle, "uTrail"),
     uTrailCount: gl.getUniformLocation(handle, "uTrailCount"),
+    uTrailBounds: gl.getUniformLocation(handle, "uTrailBounds"),
     palette: {
       uBackground: gl.getUniformLocation(handle, "uBackground"),
       uAccent: gl.getUniformLocation(handle, "uAccent"),

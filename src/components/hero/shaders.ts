@@ -1,7 +1,7 @@
 // GLSL (WebGL2 / GLSL ES 3.00) for the hero field.
 
 // Size of the trail uniform array (vec4 each; WebGL2 guarantees 224).
-export const TRAIL_POINTS = 64;
+export const TRAIL_POINTS = 96;
 
 // One triangle that covers the whole screen, generated from gl_VertexID, so
 // no vertex buffers are needed.
@@ -32,6 +32,8 @@ uniform vec3 uSignal;
 // 1.0 when a segment joins it to the previous point.
 uniform vec4 uTrail[${TRAIL_POINTS}];
 uniform int uTrailCount;
+// Box around the trail and its glow (min.xy, max.xy); nothing to do outside.
+uniform vec4 uTrailBounds;
 
 out vec4 outColor;
 
@@ -121,7 +123,9 @@ void main() {
   color = mix(color, uBackground * 0.7, near * 0.6);
 
   // The trail is light inside the smoke: brighter where the field is dense.
-  if (uTrailCount > 1) {
+  bool nearTrail = all(greaterThanEqual(uv, uTrailBounds.xy)) &&
+    all(lessThanEqual(uv, uTrailBounds.zw));
+  if (uTrailCount > 1 && nearTrail) {
     float glow = trailGlow(uv);
     color += mix(uAccentSoft, vec3(1.0), 0.35 * glow) * glow * (0.55 + 0.6 * f);
   }

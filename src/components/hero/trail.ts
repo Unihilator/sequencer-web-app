@@ -26,8 +26,13 @@ export type TrailOptions = {
 
 type CurvePoint = { x: number; y: number; life: number };
 
-// Each raw segment is split into this many pieces by the spline.
-const SUBDIVISIONS = 6;
+// The spline puts a point about every SUBDIVISION_LENGTH (units of canvas
+// height, ~2px on a laptop screen) along each raw segment.
+const SUBDIVISION_LENGTH = 0.003;
+const MAX_SUBDIVISIONS = 32;
+// Largest gap allowed between the curve and its straight-segment
+// approximation before the trail runs out of points (~half a pixel).
+const FIT_TOLERANCE = 0.0006;
 
 export class Trail {
   private points: TrailPoint[] = [];
@@ -90,8 +95,8 @@ export class Trail {
   /**
    * Packs the trail as vec4s for the shader: x, y, life (1 = fresh,
    * 0 = gone) and 1/0 for "connected to the previous point". The raw points
-   * are smoothed into a curve and spread evenly along it so the shader's
-   * straight segments read as one continuous line.
+   * are smoothed into a curve, then thinned where the line is straight, so
+   * the shader's straight segments read as one continuous curve.
    * Returns the number of points written.
    */
   pack(now: number, target: Float32Array): number {
@@ -107,7 +112,7 @@ export class Trail {
         })),
       ),
     );
-    const packed = resample(curves, capacity);
+    const packed = fitToCapacity(curves, capacity);
     packed.forEach((point, i) =>
       target.set(
         [point.x, point.y, point.life, point.connected ? 1 : 0],
@@ -134,82 +139,92 @@ export class Trail {
   }
 }
 
-/** Catmull-Rom spline through the points (passes through every one). */
+/**
+ * Centripetal Catmull-Rom spline through the points (passes through every
+ * one). Unlike the uniform variant it never overshoots or loops when the
+ * points are unevenly spaced, as pointer events often are.
+ */
 export function smoothStroke(points: CurvePoint[]): CurvePoint[] {
   if (points.length < 3) return points;
   const curve: CurvePoint[] = [];
   const last = points.length - 1;
   for (let i = 0; i < last; i++) {
-    const p0 = points[Math.max(i - 1, 0)];
     const p1 = points[i];
     const p2 = points[i + 1];
-    const p3 = points[Math.min(i + 2, last)];
-    for (let step = 0; step < SUBDIVISIONS; step++) {
-      const t = step / SUBDIVISIONS;
-      curve.push({
-        x: catmullRom(p0.x, p1.x, p2.x, p3.x, t),
-        y: catmullRom(p0.y, p1.y, p2.y, p3.y, t),
-        life: p1.life + (p2.life - p1.life) * t,
-      });
+    // Mirror the neighbours at the ends so the curve leaves straight.
+    const p0 = i > 0 ? points[i - 1] : mirror(p2, p1);
+    const p3 = i + 2 <= last ? points[i + 2] : mirror(p1, p2);
+    const steps = Math.min(
+      MAX_SUBDIVISIONS,
+      Math.max(1, Math.ceil(distance(p1, p2) / SUBDIVISION_LENGTH)),
+    );
+    for (let step = 0; step < steps; step++) {
+      curve.push(centripetal(p0, p1, p2, p3, step / steps));
     }
   }
   curve.push(points[last]);
   return curve;
 }
 
-function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return (
-    0.5 *
-    (2 * p1 +
-      (p2 - p0) * t +
-      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-      (3 * p1 - p0 - 3 * p2 + p3) * t3)
-  );
+function mirror(from: CurvePoint, around: CurvePoint): CurvePoint {
+  return {
+    x: 2 * around.x - from.x,
+    y: 2 * around.y - from.y,
+    life: around.life,
+  };
+}
+
+// Barry-Goldman evaluation of the segment p1 → p2 at u in 0..1.
+function centripetal(
+  p0: CurvePoint,
+  p1: CurvePoint,
+  p2: CurvePoint,
+  p3: CurvePoint,
+  u: number,
+): CurvePoint {
+  // Knot spacing = sqrt(distance); the epsilon guards repeated points.
+  const t1 = Math.sqrt(distance(p0, p1)) + 1e-6;
+  const t2 = t1 + Math.sqrt(distance(p1, p2)) + 1e-6;
+  const t3 = t2 + Math.sqrt(distance(p2, p3)) + 1e-6;
+  const t = t1 + (t2 - t1) * u;
+  const lerp = (a: number, b: number, from: number, to: number) =>
+    (a * (to - t) + b * (t - from)) / (to - from);
+  const axis = (k: "x" | "y") => {
+    const a1 = lerp(p0[k], p1[k], 0, t1);
+    const a2 = lerp(p1[k], p2[k], t1, t2);
+    const a3 = lerp(p2[k], p3[k], t2, t3);
+    const b1 = lerp(a1, a2, 0, t2);
+    const b2 = lerp(a2, a3, t1, t3);
+    return lerp(b1, b2, t1, t2);
+  };
+  return {
+    x: axis("x"),
+    y: axis("y"),
+    life: p1.life + (p2.life - p1.life) * u,
+  };
 }
 
 /**
- * Re-spaces the curves evenly along their length so that together they fit
- * in `capacity` points. Each curve keeps its endpoints; the first point of a
- * curve is marked as not connected.
+ * Thins the curves to at most `capacity` points in total, keeping points
+ * where the line bends and dropping them on straight runs
+ * (Ramer-Douglas-Peucker with a tolerance that grows until it fits).
+ * The first point of each curve is marked as not connected.
  */
-export function resample(
+export function fitToCapacity(
   curves: CurvePoint[][],
   capacity: number,
 ): (CurvePoint & { connected: boolean })[] {
-  const lengths = curves.map(polylineLength);
-  const total = lengths.reduce((sum, length) => sum + length, 0);
-  const spacing = total / Math.max(1, capacity - 2 * curves.length);
-  const result: (CurvePoint & { connected: boolean })[] = [];
-
-  for (const curve of curves) {
-    if (curve.length === 0) continue;
-    result.push({ ...curve[0], connected: false });
-    let carried = 0; // distance walked since the last emitted point
-    for (let i = 1; i < curve.length; i++) {
-      const a = curve[i - 1];
-      const b = curve[i];
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      let offset = spacing - carried;
-      while (spacing > 0 && offset < length) {
-        const t = offset / length;
-        result.push({
-          x: a.x + (b.x - a.x) * t,
-          y: a.y + (b.y - a.y) * t,
-          life: a.life + (b.life - a.life) * t,
-          connected: true,
-        });
-        offset += spacing;
-      }
-      carried = length - (offset - spacing);
-    }
-    if (curve.length > 1) {
-      result.push({ ...curve[curve.length - 1], connected: true });
-    }
+  let tolerance = FIT_TOLERANCE;
+  let fitted = curves.map((curve) => simplify(curve, tolerance));
+  const count = () => fitted.reduce((sum, curve) => sum + curve.length, 0);
+  while (count() > capacity && tolerance < 1) {
+    tolerance *= 1.5;
+    fitted = curves.map((curve) => simplify(curve, tolerance));
   }
-
-  // Rounding can overshoot by a point or two: drop the oldest.
+  const result = fitted.flatMap((curve) =>
+    curve.map((point, i) => ({ ...point, connected: i > 0 })),
+  );
+  // Many tiny strokes can still overflow: drop the oldest.
   if (result.length > capacity) {
     result.splice(0, result.length - capacity);
     result[0].connected = false;
@@ -217,15 +232,46 @@ export function resample(
   return result;
 }
 
-function polylineLength(points: CurvePoint[]): number {
-  let length = 0;
-  for (let i = 1; i < points.length; i++) {
-    length += Math.hypot(
-      points[i].x - points[i - 1].x,
-      points[i].y - points[i - 1].y,
-    );
+function simplify(points: CurvePoint[], tolerance: number): CurvePoint[] {
+  if (points.length < 3) return points;
+  const keep = new Uint8Array(points.length);
+  keep[0] = keep[points.length - 1] = 1;
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [first, last] = stack.pop()!;
+    let farthest = -1;
+    let farthestDistance = tolerance;
+    for (let i = first + 1; i < last; i++) {
+      const d = distanceToSegment(points[i], points[first], points[last]);
+      if (d > farthestDistance) {
+        farthest = i;
+        farthestDistance = d;
+      }
+    }
+    if (farthest !== -1) {
+      keep[farthest] = 1;
+      stack.push([first, farthest], [farthest, last]);
+    }
   }
-  return length;
+  return points.filter((_, i) => keep[i]);
+}
+
+function distance(a: CurvePoint, b: CurvePoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function distanceToSegment(p: CurvePoint, a: CurvePoint, b: CurvePoint) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t =
+    lengthSquared === 0
+      ? 0
+      : Math.min(
+          1,
+          Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared),
+        );
+  return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
 }
 
 /**

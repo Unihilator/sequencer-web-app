@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { Trail, toFieldSpace } from "./trail";
+import { fitToCapacity, smoothStroke, Trail, toFieldSpace } from "./trail";
 
 const makeTrail = (maxPoints = 4) =>
   new Trail({
@@ -67,12 +67,12 @@ describe("Trail", () => {
     trail.add(0, 0, 0);
     trail.add(0.2, 0.1, 0.5);
     const target = new Float32Array(4 * 4);
-    expect(trail.pack(0.6, target)).toBe(3); // start, middle, head
+    expect(trail.pack(0.6, target)).toBe(2); // a straight line needs no more
     // First point: start of the stroke, 40% of its life left.
     [0, 0, 0.4, 0].forEach((value, i) => expect(target[i]).toBeCloseTo(value));
     // Last point: the head, connected, 90% left.
     [0.2, 0.1, 0.9, 1].forEach((value, i) =>
-      expect(target[8 + i]).toBeCloseTo(value),
+      expect(target[4 + i]).toBeCloseTo(value),
     );
   });
 
@@ -87,7 +87,7 @@ describe("Trail", () => {
     expect(trail.pack(0.8, target)).toBe(0);
   });
 
-  test("smooths a coarse circle into an even, round curve", () => {
+  test("smooths a coarse circle into a round curve", () => {
     const trail = makeTrail(64);
     for (let i = 0; i <= 12; i++) {
       const angle = (i / 12) * Math.PI * 2;
@@ -95,20 +95,64 @@ describe("Trail", () => {
     }
     const target = new Float32Array(64 * 4);
     const count = trail.pack(0.12, target);
-    expect(count).toBeGreaterThan(48);
     expect(count).toBeLessThanOrEqual(64);
-    const steps: number[] = [];
-    for (let i = 0; i < count; i++) {
-      const x = target[i * 4];
-      const y = target[i * 4 + 1];
-      // Stays close to the circle between the raw points...
-      expect(Math.abs(Math.hypot(x, y) - 0.3)).toBeLessThan(0.01);
-      if (i > 0) {
-        steps.push(Math.hypot(x - target[i * 4 - 4], y - target[i * 4 - 3]));
-      }
+    const at = (i: number) => ({ x: target[i * 4], y: target[i * 4 + 1] });
+    for (let i = 1; i < count; i++) {
+      // The shader draws straight segments; even their midpoints must sit
+      // on the circle (the raw 12-gon is 0.01 off in the middle of a side).
+      const a = at(i - 1);
+      const b = at(i);
+      // The open ends leave straight by design; check the closed middle.
+      const angle = Math.atan2(a.y, a.x);
+      if (Math.abs(angle) < Math.PI / 6) continue;
+      const middle = Math.hypot((a.x + b.x) / 2, (a.y + b.y) / 2);
+      expect(Math.abs(middle - 0.3)).toBeLessThan(0.002);
     }
-    // ...with far shorter steps than the 0.157 between the raw points.
-    expect(Math.max(...steps)).toBeLessThan(0.04);
+  });
+
+  test("handles unevenly spaced points without loops", () => {
+    // A long jump followed by tiny steps: a uniform spline overshoots here.
+    const curve = smoothStroke([
+      { x: 0, y: 0, life: 1 },
+      { x: 0.5, y: 0, life: 1 },
+      { x: 0.51, y: 0.01, life: 1 },
+      { x: 0.52, y: 0.02, life: 1 },
+    ]);
+    for (const point of curve) {
+      expect(point.x).toBeGreaterThanOrEqual(-1e-9);
+      expect(point.x).toBeLessThanOrEqual(0.52 + 1e-9);
+    }
+  });
+});
+
+describe("fitToCapacity", () => {
+  const line = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ x: i / n, y: 0, life: 1 }));
+
+  test("collapses straight runs to their endpoints", () => {
+    expect(fitToCapacity([line(50)], 64)).toHaveLength(2);
+  });
+
+  test("never exceeds the capacity and keeps the newest points", () => {
+    const wiggle = Array.from({ length: 500 }, (_, i) => ({
+      x: i * 0.01,
+      y: i % 2 ? 0.05 : -0.05,
+      life: 1,
+    }));
+    const fitted = fitToCapacity([wiggle], 64);
+    expect(fitted.length).toBeLessThanOrEqual(64);
+    expect(fitted.at(-1)).toMatchObject({ x: 4.99 });
+    expect(fitted[0].connected).toBe(false);
+  });
+
+  test("marks where each stroke starts", () => {
+    const fitted = fitToCapacity([line(3), line(3)], 64);
+    expect(fitted.map((point) => point.connected)).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
   });
 });
 
