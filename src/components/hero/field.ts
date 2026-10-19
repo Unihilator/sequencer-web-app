@@ -17,6 +17,40 @@ const MAX_FRAME_SECONDS = 0.1;
 // How quickly the parallax follows the pointer (per second); lower = lazier.
 const POINTER_FOLLOW = 2.5;
 
+type Rgb = [number, number, number];
+
+// CSS tokens from globals.css that tint the field (single source of truth).
+const PALETTE_TOKENS = {
+  uBackground: "--background",
+  uAccent: "--accent",
+  uAccentSoft: "--accent-soft",
+  uSignal: "--signal",
+} as const;
+type PaletteUniform = keyof typeof PALETTE_TOKENS;
+
+/** "#3e7198" → [0.24, 0.44, 0.6]; null for anything but #rrggbb. */
+export function parseHexColor(value: string): Rgb | null {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+  return [match[1], match[2], match[3]].map(
+    (channel) => parseInt(channel, 16) / 255,
+  ) as Rgb;
+}
+
+function readPalette(): Record<PaletteUniform, Rgb> {
+  const styles = getComputedStyle(document.documentElement);
+  const read = (token: string): Rgb =>
+    parseHexColor(styles.getPropertyValue(token)) ?? [0, 0, 0];
+  return {
+    uBackground: read(PALETTE_TOKENS.uBackground),
+    uAccent: read(PALETTE_TOKENS.uAccent),
+    uAccentSoft: read(PALETTE_TOKENS.uAccentSoft),
+    uSignal: read(PALETTE_TOKENS.uSignal),
+  };
+}
+
 /** Size of the drawing buffer for a canvas of the given CSS size. */
 export function renderSize(
   cssWidth: number,
@@ -56,6 +90,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     return () => {};
   }
 
+  const palette = readPalette();
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let elapsed = START_TIME;
   let lastFrame: number | null = null;
@@ -72,6 +107,9 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     gl.uniform2f(program.uResolution, canvas.width, canvas.height);
     gl.uniform1f(program.uTime, elapsed);
     gl.uniform2f(program.uPointer, pointer.x, pointer.y);
+    for (const name of Object.keys(palette) as PaletteUniform[]) {
+      gl.uniform3fv(program.palette[name], palette[name]);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
@@ -182,6 +220,7 @@ type FieldProgram = {
   uResolution: WebGLUniformLocation | null;
   uTime: WebGLUniformLocation | null;
   uPointer: WebGLUniformLocation | null;
+  palette: Record<PaletteUniform, WebGLUniformLocation | null>;
 };
 
 function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
@@ -207,6 +246,12 @@ function createProgram(gl: WebGL2RenderingContext): FieldProgram | null {
     uResolution: gl.getUniformLocation(handle, "uResolution"),
     uTime: gl.getUniformLocation(handle, "uTime"),
     uPointer: gl.getUniformLocation(handle, "uPointer"),
+    palette: {
+      uBackground: gl.getUniformLocation(handle, "uBackground"),
+      uAccent: gl.getUniformLocation(handle, "uAccent"),
+      uAccentSoft: gl.getUniformLocation(handle, "uAccentSoft"),
+      uSignal: gl.getUniformLocation(handle, "uSignal"),
+    },
   };
 }
 

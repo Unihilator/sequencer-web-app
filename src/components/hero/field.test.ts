@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { renderSize } from "./field";
+import { parseHexColor, renderSize } from "./field";
 
 describe("renderSize", () => {
   test("renders at half resolution on a standard screen", () => {
@@ -14,5 +14,22 @@ describe("renderSize", () => {
 
   test("never returns an empty buffer", () => {
     expect(renderSize(0, 0, 2)).toEqual({ width: 1, height: 1 });
+  });
+});
+
+describe("parseHexColor", () => {
+  test("converts #rrggbb to 0..1 channels", () => {
+    expect(parseHexColor("#ff0080")).toEqual([1, 0, 128 / 255]);
+    expect(parseHexColor(" #3E7198 ")).toEqual([
+      62 / 255,
+      113 / 255,
+      152 / 255,
+    ]);
+  });
+
+  test("rejects other formats", () => {
+    expect(parseHexColor("")).toBeNull();
+    expect(parseHexColor("#fff")).toBeNull();
+    expect(parseHexColor("rgb(0, 0, 0)")).toBeNull();
   });
 });

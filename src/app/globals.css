@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — palette "Ultramarine" (A1).
+ * Design tokens — palette "Steel" (tuned from A1 in the field tone lab).
  * Dark theme is the primary (and for now only) theme: a blue-black ground,
- * warm off-white ink, one bold ultramarine accent and a coral counterpoint.
+ * warm off-white ink, a steel-blue accent and a coral counterpoint.
+ * The hero shader reads these four colors too: hex values only (#rrggbb).
  */
 :root {
   --background: #0b0c14;
@@ -11,9 +12,9 @@
   --foreground: #eeede8;
   --muted: #8a8da3;
   /* Fills (buttons, active cells). Too dark for text on the background. */
-  --accent: #3d46fb;
+  --accent: #3e7198;
   /* Accent for text and thin lines on the dark ground. */
-  --accent-soft: #8a90ff;
+  --accent-soft: #7aa7ff;
   /* Second accent, used sparingly. */
   --signal: #ff6b4a;
   color-scheme: dark;
