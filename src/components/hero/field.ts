@@ -77,7 +77,11 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     return () => {};
   }
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  let renderer = createRenderer(gl, !reducedMotion.matches);
+  // Read the query once and then only from its change events. In Chromium,
+  // reading .matches elsewhere (say, an IntersectionObserver callback) after
+  // the setting flips can swallow this query's change event for good.
+  let reduced = reducedMotion.matches;
+  let renderer = createRenderer(gl, !reduced);
   if (!renderer) {
     setState("unsupported");
     return () => {};
@@ -112,9 +116,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(
       gl.TEXTURE_2D,
-      reducedMotion.matches
-        ? zeroVelocity
-        : (fluid?.velocityTexture ?? zeroVelocity),
+      reduced ? zeroVelocity : (fluid?.velocityTexture ?? zeroVelocity),
     );
     gl.uniform1i(uniforms.uVelocity, 0);
     gl.uniform2f(uniforms.uResolution, canvas.width, canvas.height);
@@ -150,9 +152,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   const update = () => {
     if (contextLost || !renderer) return;
     const animate =
-      !reducedMotion.matches &&
-      onScreen &&
-      document.visibilityState === "visible";
+      !reduced && onScreen && document.visibilityState === "visible";
     if (animate) {
       if (!frameId) {
         lastFrame = null;
@@ -165,12 +165,12 @@ export function startField(canvas: HTMLCanvasElement): () => void {
     frameId = 0;
     clearInput();
     // Dispose motion when reducing animation; resuming starts with calm smoke.
-    if (reducedMotion.matches) {
+    if (reduced) {
       renderer.fluid?.dispose();
       renderer.fluid = null;
     }
     draw();
-    setState(reducedMotion.matches ? "static" : "paused");
+    setState(reduced ? "static" : "paused");
   };
 
   const sizeFluid = () => {
@@ -198,13 +198,17 @@ export function startField(canvas: HTMLCanvasElement): () => void {
       if (!frameId) draw();
     }
   };
-  const onMotionChange = () => {
-    if (!reducedMotion.matches && renderer && !contextLost) {
+  const applyMotion = () => {
+    if (!reduced && renderer && !contextLost) {
       renderer.fluid ??= Fluid.create(gl);
       sizeFluid();
     }
     update();
-    if (reducedMotion.matches) canvas.dataset.motion = "none";
+    if (reduced) canvas.dataset.motion = "none";
+  };
+  const onMotionChange = (event: MediaQueryListEvent) => {
+    reduced = event.matches;
+    applyMotion();
   };
 
   const resizeObserver = new ResizeObserver(resize);
@@ -226,7 +230,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
   };
   const onContextRestored = () => {
     contextLost = false;
-    renderer = createRenderer(gl, !reducedMotion.matches);
+    renderer = createRenderer(gl, !reduced);
     if (renderer) {
       sizeFluid();
       update();
@@ -299,7 +303,7 @@ export function startField(canvas: HTMLCanvasElement): () => void {
 
   resize();
   sizeFluid();
-  onMotionChange();
+  applyMotion();
 
   return () => {
     cancelAnimationFrame(frameId);
