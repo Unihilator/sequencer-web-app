@@ -62,7 +62,7 @@
 
 - pnpm dev / pnpm build / pnpm lint / pnpm typecheck / pnpm test / pnpm test:e2e
 - pnpm format (записати) / pnpm format:check (перевірити, як у CI)
-- Один unit-тест: `pnpm test src/app/page.test.tsx` або `pnpm test -t "назва тесту"`; watch-режим: `pnpm test:watch`
+- Один unit-тест: `pnpm test "src/app/(site)/page.test.tsx"` або `pnpm test -t "назва тесту"`; watch-режим: `pnpm test:watch`
 - Один e2e-тест: `pnpm test:e2e e2e/home.spec.ts --project=chromium`
 - Unit-тести лежать поруч із кодом (`src/**/*.test.ts(x)`), e2e — у `e2e/`. Playwright сам піднімає `pnpm dev` (у CI — `build && start`); проєкти: chromium і mobile-safari (WebKit, iPhone 15).
 
