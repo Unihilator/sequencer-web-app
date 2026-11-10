@@ -37,17 +37,28 @@ test.describe("hero field", () => {
     });
     await page.goto("/");
     await expect(canvas(page)).toHaveAttribute("data-motion", "fluid");
-    const bounds = (await canvas(page).boundingBox())!;
-    await page.mouse.move(
-      bounds.x + bounds.width * 0.3,
-      bounds.y + bounds.height * 0.3,
-    );
-    for (let i = 1; i <= 12; i++) {
-      await page.mouse.move(
-        bounds.x + bounds.width * (0.3 + i * 0.025),
-        bounds.y + bounds.height * (0.3 + i * 0.01),
-      );
-    }
+    await expect(canvas(page)).toHaveAttribute("data-state", "running");
+    // A real mouse reports every ~8 ms. Playwright's mouse.move waits for
+    // each event to be handled, and with software WebGL in headless browsers
+    // a frame can take over 150 ms, which the field reads as a pause between
+    // two gestures. So the stroke is dispatched within one task, 16 ms apart.
+    await canvas(page).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      for (let i = 0; i <= 12; i++) {
+        const start = performance.now();
+        while (performance.now() - start < 16) {
+          // Hold the main thread so event timestamps are evenly spaced.
+        }
+        window.dispatchEvent(
+          new PointerEvent("pointermove", {
+            pointerId: 1,
+            pointerType: "mouse",
+            clientX: rect.left + rect.width * (0.3 + i * 0.025),
+            clientY: rect.top + rect.height * (0.3 + i * 0.01),
+          }),
+        );
+      }
+    });
     await expect
       .poll(() =>
         canvas(page).evaluate((element) => {
@@ -66,24 +77,18 @@ test.describe("hero field", () => {
             texture,
             0,
           );
-          const pixels = new Float32Array(4);
-          // Sample across the stirred region in the 160-row simulation grid.
+          // Scan the whole 160-row simulation grid: the swirl drifts away
+          // from the stroke as the fluid advects it.
+          const height = 160;
           const width = Math.round(
-            (160 * (element as HTMLCanvasElement).width) /
+            (height * (element as HTMLCanvasElement).width) /
               (element as HTMLCanvasElement).height,
           );
+          const pixels = new Float32Array(width * height * 4);
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
           let speed = 0;
-          for (let x = 0.3; x < 0.65; x += 0.05) {
-            gl.readPixels(
-              Math.floor(width * x),
-              Math.floor(160 * 0.65),
-              1,
-              1,
-              gl.RGBA,
-              gl.FLOAT,
-              pixels,
-            );
-            speed = Math.max(speed, Math.hypot(pixels[0], pixels[1]));
+          for (let i = 0; i < pixels.length; i += 4) {
+            speed = Math.max(speed, Math.hypot(pixels[i], pixels[i + 1]));
           }
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           gl.deleteFramebuffer(framebuffer);
