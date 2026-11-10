@@ -59,45 +59,56 @@ test.describe("hero field", () => {
         );
       }
     });
-    await expect
-      .poll(() =>
-        canvas(page).evaluate((element) => {
-          const gl = (element as HTMLCanvasElement).getContext("webgl2")!;
-          // The field's texture unit 0 holds the current fluid velocity.
-          gl.activeTexture(gl.TEXTURE0);
-          const texture = gl.getParameter(
-            gl.TEXTURE_BINDING_2D,
-          ) as WebGLTexture;
-          const framebuffer = gl.createFramebuffer();
-          gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-          gl.framebufferTexture2D(
-            gl.FRAMEBUFFER,
-            gl.COLOR_ATTACHMENT0,
-            gl.TEXTURE_2D,
-            texture,
-            0,
-          );
-          // Scan the whole 160-row simulation grid: the swirl drifts away
-          // from the stroke as the fluid advects it.
-          const height = 160;
-          const width = Math.round(
-            (height * (element as HTMLCanvasElement).width) /
-              (element as HTMLCanvasElement).height,
-          );
-          const pixels = new Float32Array(width * height * 4);
-          gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
-          let speed = 0;
-          for (let i = 0; i < pixels.length; i += 4) {
-            speed = Math.max(speed, Math.hypot(pixels[i], pixels[i + 1]));
-          }
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          gl.deleteFramebuffer(framebuffer);
-          if (gl.getError() !== gl.NO_ERROR)
-            throw new Error("Fluid readback failed");
-          return speed;
-        }),
-      )
-      .toBeGreaterThan(0.1);
+    // Two frames later the field has applied the stroke. Then scroll the hero
+    // away so the field pauses: reading pixels waits for the GPU to finish
+    // every queued frame, which with software WebGL on a busy CI runner can
+    // take seconds while the simulation keeps adding more.
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    await page.evaluate(() =>
+      window.scrollTo({ top: window.innerHeight * 2, behavior: "instant" }),
+    );
+    await expect(canvas(page)).toHaveAttribute("data-state", "paused");
+    const speed = await canvas(page).evaluate((element) => {
+      const gl = (element as HTMLCanvasElement).getContext("webgl2")!;
+      // The field's texture unit 0 holds the current fluid velocity.
+      gl.activeTexture(gl.TEXTURE0);
+      const texture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture;
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        texture,
+        0,
+      );
+      // Scan the whole 160-row simulation grid: the swirl drifts away
+      // from the stroke as the fluid advects it.
+      const height = 160;
+      const width = Math.round(
+        (height * (element as HTMLCanvasElement).width) /
+          (element as HTMLCanvasElement).height,
+      );
+      const pixels = new Float32Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
+      let speed = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        speed = Math.max(speed, Math.hypot(pixels[i], pixels[i + 1]));
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      if (gl.getError() !== gl.NO_ERROR)
+        throw new Error("Fluid readback failed");
+      return speed;
+    });
+    expect(speed).toBeGreaterThan(0.1);
+    // Back on screen, the field resumes.
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await expect(canvas(page)).toHaveAttribute("data-state", "running");
     expect(errors).toEqual([]);
   });
