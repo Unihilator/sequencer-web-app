@@ -16,6 +16,7 @@ export function HeroBackground() {
   return (
     <div
       aria-hidden="true"
+      data-hero-field
       className="absolute inset-0 -z-10"
       style={{ background: FALLBACK_GRADIENT }}
     >
